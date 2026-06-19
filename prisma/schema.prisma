@@ -1,13 +1,227 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "cockroachdb"
+}
+
+// User and Auth
+model Rol {
+  id       String    @id @default(uuid()) @db.Uuid
+  nombre   String
+  permisos Json?     @db.JsonB
+  usuarios Usuario[]
+}
+
+model Departamento {
+  id          String    @id @default(uuid()) @db.Uuid
+  nombre      String
+  descripcion String?
+  usuarios    Usuario[]
+}
+
+model Usuario {
+  id             String    @id @default(uuid()) @db.Uuid
+  nombre         String
+  apellido       String
+  correo         String    @unique
+  userName       String    @unique
+  password       String?   // Para el MVP antes de integrar AD/SSO
+  telefono       String?
+  departamentoId String?   @db.Uuid
+  rolId          String    @db.Uuid
+  fechaRegistro  DateTime  @default(now())
+  
+  departamento Departamento? @relation(fields: [departamentoId], references: [id])
+  rol          Rol           @relation(fields: [rolId], references: [id])
+  
+  ticketsSolicitados   Ticket[]             @relation("Solicitante")
+  ticketsAsignados     Ticket[]             @relation("Agente")
+  comentarios          Comentario[]
+  logsTicket           LogTicket[]
+  equiposSupervisor    Equipo[]             @relation("Supervisor")
+  equipos              EquipoUsuario[]
+  plantillasCreadas    PlantillaRespuesta[]
+  automatizaciones     Automatizacion[]
+}
+
+// Ticketing core
+model Categoria {
+  id            String  @id @default(uuid()) @db.Uuid
+  nombre        String
+  descripcion   String?
+  colaDefaultId String? @db.Uuid
+  
+  colaDefault   Cola?   @relation(fields: [colaDefaultId], references: [id])
+  tickets       Ticket[]
+  slas          Sla[]
+}
+
+model Sla {
+  id               String    @id @default(uuid()) @db.Uuid
+  categoriaId      String    @db.Uuid
+  prioridad        String    // CRITICA, ALTA, MEDIA, BAJA
+  minutosRespuesta Int
+  minutosResolucion Int
+  
+  categoria Categoria @relation(fields: [categoriaId], references: [id])
+  tickets   Ticket[]
+}
+
+model Equipo {
+  id           String @id @default(uuid()) @db.Uuid
+  nombre       String
+  supervisorId String @db.Uuid
+  
+  supervisor Usuario         @relation("Supervisor", fields: [supervisorId], references: [id])
+  miembros   EquipoUsuario[]
+  colas      Cola[]
+}
+
+model EquipoUsuario {
+  equipoId  String @db.Uuid
+  usuarioId String @db.Uuid
+  
+  equipo  Equipo  @relation(fields: [equipoId], references: [id])
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@id([equipoId, usuarioId])
+}
+
+model Cola {
+  id       String @id @default(uuid()) @db.Uuid
+  nombre   String
+  equipoId String @db.Uuid
+  
+  equipo     Equipo      @relation(fields: [equipoId], references: [id])
+  categorias Categoria[]
+  tickets    Ticket[]
+}
+
+model Ticket {
+  id              String    @id @default(uuid()) @db.Uuid
+  codigo          String    @unique
+  asunto          String
+  descripcion     String
+  estado          String    // NUEVO, ASIGNADO, EN_PROGRESO, RESUELTO, CERRADO
+  nivelPrioridad  String    // CRITICA, ALTA, MEDIA, BAJA
+  solicitanteId   String    @db.Uuid
+  agenteId        String?   @db.Uuid
+  categoriaId     String    @db.Uuid
+  colaId          String?   @db.Uuid
+  slaId           String?   @db.Uuid
+  origen          String    // WEB, CORREO
+  fechaCreacion   DateTime  @default(now())
+  fechaResolucion DateTime?
+  fechaCierre     DateTime?
+
+  solicitante Usuario      @relation("Solicitante", fields: [solicitanteId], references: [id])
+  agente      Usuario?     @relation("Agente", fields: [agenteId], references: [id])
+  categoria   Categoria    @relation(fields: [categoriaId], references: [id])
+  cola        Cola?        @relation(fields: [colaId], references: [id])
+  sla         Sla?         @relation(fields: [slaId], references: [id])
+  
+  comentarios Comentario[]
+  adjuntos    Adjunto[]
+  logs        LogTicket[]
+  etiquetas   TicketEtiqueta[]
+  encuesta    EncuestaSatisfaccion?
+}
+
+model Comentario {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @db.Uuid
+  usuarioId String   @db.Uuid
+  mensaje   String
+  esInterno Boolean  @default(false)
+  fecha     DateTime @default(now())
+  
+  ticket  Ticket    @relation(fields: [ticketId], references: [id])
+  usuario Usuario   @relation(fields: [usuarioId], references: [id])
+  adjuntos Adjunto[]
+}
+
+model Adjunto {
+  id           String   @id @default(uuid()) @db.Uuid
+  ticketId     String   @db.Uuid
+  comentarioId String?  @db.Uuid
+  url          String
+  tipo         String
+  nombre       String
+  fecha        DateTime @default(now())
+  
+  ticket     Ticket      @relation(fields: [ticketId], references: [id])
+  comentario Comentario? @relation(fields: [comentarioId], references: [id])
+}
+
+model LogTicket {
+  id            String   @id @default(uuid()) @db.Uuid
+  ticketId      String   @db.Uuid
+  usuarioId     String   @db.Uuid
+  accion        String
+  valorAnterior String?
+  valorNuevo    String?
+  fecha         DateTime @default(now())
+  
+  ticket  Ticket  @relation(fields: [ticketId], references: [id])
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+}
+
+model EncuestaSatisfaccion {
+  id         String   @id @default(uuid()) @db.Uuid
+  ticketId   String   @unique @db.Uuid
+  puntuacion Int
+  comentario String?
+  fecha      DateTime @default(now())
+  
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+}
+
+model Etiqueta {
+  id     String @id @default(uuid()) @db.Uuid
+  nombre String
+  color  String
+  
+  tickets TicketEtiqueta[]
+}
+
+model TicketEtiqueta {
+  ticketId   String @db.Uuid
+  etiquetaId String @db.Uuid
+  
+  ticket   Ticket   @relation(fields: [ticketId], references: [id])
+  etiqueta Etiqueta @relation(fields: [etiquetaId], references: [id])
+
+  @@id([ticketId, etiquetaId])
+}
+
+model PlantillaRespuesta {
+  id            String   @id @default(uuid()) @db.Uuid
+  titulo        String
+  contenido     String
+  creadaPorId   String   @db.Uuid
+  esGlobal      Boolean  @default(false)
+  fechaCreacion DateTime @default(now())
+  
+  creador Usuario @relation(fields: [creadaPorId], references: [id])
+}
+
+model Automatizacion {
+  id          String   @id @default(uuid()) @db.Uuid
+  nombre      String
+  descripcion String?
+  condiciones Json     @db.JsonB
+  acciones    Json     @db.JsonB
+  activa      Boolean  @default(true)
+  creadaPorId String   @db.Uuid
+  
+  creador Usuario @relation(fields: [creadaPorId], references: [id])
+}
+
+model Configuracion {
+  id    String @id @default(uuid()) @db.Uuid
+  clave String @unique
+  valor String
+  grupo String
 }
