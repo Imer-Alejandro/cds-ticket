@@ -19,7 +19,7 @@ export async function GET() {
     })
 
     return NextResponse.json(etiquetas)
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Error al obtener etiquetas' }, { status: 500 })
   }
 }
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     })
 
     return NextResponse.json(newEtiqueta, { status: 201 })
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Error al crear etiqueta' }, { status: 500 })
   }
 }

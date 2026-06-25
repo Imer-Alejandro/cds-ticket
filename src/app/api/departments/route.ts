@@ -19,7 +19,7 @@ export async function GET() {
     })
 
     return NextResponse.json(departamentos)
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Error al obtener departamentos' }, { status: 500 })
   }
 }
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     })
 
     return NextResponse.json(newDept, { status: 201 })
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Error al crear departamento' }, { status: 500 })
   }
 }

@@ -4,10 +4,11 @@ import { getSession } from '@/lib/auth'
 
 export async function GET() {
   try {
-    const session = await getSession()
-    if (!session) {
-      return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
-    }
+    // auth temporarily disabled for MVP
+    // const session = await getSession()
+    // if (!session) {
+    //   return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+    // }
 
     const categorias = await prisma.categoria.findMany({
       orderBy: { nombre: 'asc' },
@@ -20,7 +21,7 @@ export async function GET() {
     })
 
     return NextResponse.json(categorias)
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Error al obtener categorías' }, { status: 500 })
   }
 }
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
     })
 
     return NextResponse.json(newCategoria, { status: 201 })
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Error al crear categoría' }, { status: 500 })
   }
 }
