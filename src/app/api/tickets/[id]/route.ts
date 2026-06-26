@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { createNotification, notifyAgentes } from '@/lib/notifications'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -84,6 +85,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           valorNuevo: log.valorNuevo,
         },
       })
+    }
+
+    if (data.estado) {
+      await createNotification(ticket.solicitanteId, 'CAMBIO_ESTADO', `Ticket ${ticket.codigo} cambió a ${data.estado.replace(/_/g, ' ')}`, id)
+    }
+    if (data.agenteId && data.agenteId !== ticket.agenteId) {
+      await createNotification(data.agenteId, 'ASIGNACION', `Has sido asignado al ticket ${ticket.codigo}: ${ticket.asunto}`, id)
     }
 
     return NextResponse.json(updated)

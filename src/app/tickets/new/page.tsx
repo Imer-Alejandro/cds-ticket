@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
 import { useAuthStore } from "@/store/useAuthStore"
-import { ArrowLeft, Send, AlertCircle, Loader2, FileText, Tag, Ticket, ChevronRight } from "lucide-react"
+import { ArrowLeft, Send, AlertCircle, Loader2, FileText, Tag, Ticket, ChevronRight, Paperclip, X } from "lucide-react"
 
 interface Categoria { id: string; nombre: string; descripcion: string | null }
 
@@ -26,6 +26,7 @@ export default function NewTicketPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [form, setForm] = useState({ asunto: "", descripcion: "", categoriaId: "", nivelPrioridad: "MEDIA" })
+  const [files, setFiles] = useState<File[]>([])
 
   useEffect(() => {
     fetch("/api/categories")
@@ -33,6 +34,18 @@ export default function NewTicketPage() {
       .then(data => { setCategories(data || []); setLoadingCat(false) })
       .catch(() => setLoadingCat(false))
   }, [])
+
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result as string
+        resolve(result.split(',')[1] || '')
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -42,10 +55,19 @@ export default function NewTicketPage() {
     if (!form.categoriaId) { setError("Selecciona una categoría"); return }
     setSaving(true); setError("")
     try {
+      const adjuntos = await Promise.all(
+        files.map(async (f) => ({
+          nombre: f.name,
+          tipo: f.type,
+          tamaño: f.size,
+          data: await readFileAsBase64(f),
+          url: '',
+        }))
+      )
       const res = await fetch("/api/tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, solicitanteId: user.id }),
+        body: JSON.stringify({ ...form, solicitanteId: user.id, adjuntos }),
       })
       if (res.ok) {
         const ticket = await res.json()
@@ -136,6 +158,33 @@ export default function NewTicketPage() {
                     maxLength={2000}
                   />
                   <p className="text-xs text-muted-foreground text-right">{form.descripcion.length}/2000</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <Paperclip className="h-4 w-4" /> Adjuntos
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-3 rounded-xl border-2 border-dashed border-border bg-muted/20 px-4 py-6 text-sm text-muted-foreground hover:border-primary/50 hover:bg-muted/40 transition-colors">
+                    <Paperclip className="h-5 w-5 shrink-0" />
+                    <span>Haz clic para seleccionar archivos o arrastra y suelta</span>
+                    <input type="file" multiple className="hidden" onChange={e => { if (e.target.files) setFiles(prev => [...prev, ...Array.from(e.target.files!)]) }} />
+                  </label>
+                  {files.length > 0 && (
+                    <div className="space-y-2 mt-2">
+                      {Array.from(files).map((f, i) => (
+                        <div key={i} className="flex items-center justify-between rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            <span className="truncate">{f.name}</span>
+                            <span className="text-xs text-muted-foreground shrink-0">({(f.size / 1024).toFixed(1)} KB)</span>
+                          </div>
+                          <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="shrink-0 text-muted-foreground hover:text-destructive ml-2">
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

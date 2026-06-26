@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { notifyAgentes, createNotification } from '@/lib/notifications'
 
 export async function GET(request: Request) {
   try {
@@ -90,6 +91,21 @@ export async function POST(request: Request) {
         valorNuevo: 'Ticket creado',
       },
     })
+
+    if (data.adjuntos && Array.isArray(data.adjuntos)) {
+      await prisma.adjunto.createMany({
+        data: data.adjuntos.map((a: any) => ({
+          ticketId: ticket.id,
+          nombre: a.nombre,
+          tipo: a.tipo,
+          url: a.url || '',
+          data: a.data,
+          tamaño: a.tamaño,
+        })),
+      })
+    }
+
+    await notifyAgentes(ticket.id, 'NUEVO_TICKET', `Nuevo ticket ${ticket.codigo}: ${ticket.asunto}`)
 
     return NextResponse.json(ticket, { status: 201 })
   } catch {

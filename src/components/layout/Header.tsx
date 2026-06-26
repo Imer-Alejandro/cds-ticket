@@ -1,37 +1,34 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import { Bell, Search, Plus, Loader2 } from "lucide-react"
+import { Bell, Search, Plus, Loader2, CheckCheck } from "lucide-react"
 import { Input } from "../ui/input"
 import { Button } from "../ui/button"
 import { useAuthStore } from "@/store/useAuthStore"
+import { useSocket, onNotificacion } from "@/hooks/useSocket"
+import { playNotificationSound } from "@/lib/sound"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { apiFetch } from "@/lib/api"
 
 interface SearchResult {
-  id: string
-  codigo: string
-  asunto: string
-  estado: string
-  nivelPrioridad: string
+  id: string; codigo: string; asunto: string; estado: string; nivelPrioridad: string
   solicitante: { nombre: string; apellido: string }
   agente: { nombre: string; apellido: string } | null
 }
 
+interface Notificacion {
+  id: string; tipo: string; mensaje: string; leido: boolean; fecha: string
+  ticket: { codigo: string; asunto: string }
+}
+
 const ESTADO_LABEL: Record<string, string> = {
-  NUEVO: "Nuevo",
-  ASIGNADO: "Asignado",
-  EN_PROGRESO: "En Progreso",
-  RESUELTO: "Resuelto",
-  CERRADO: "Cerrado",
+  NUEVO: "Nuevo", ASIGNADO: "Asignado", EN_PROGRESO: "En Progreso", RESUELTO: "Resuelto", CERRADO: "Cerrado",
 }
 
 function useDebounce(value: string, delay: number) {
   const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(timer)
-  }, [value, delay])
+  useEffect(() => { const t = setTimeout(() => setDebounced(value), delay); return () => clearTimeout(t) }, [value, delay])
   return debounced
 }
 
@@ -45,39 +42,70 @@ export function Header() {
   const debouncedQuery = useDebounce(query, 300)
   const ref = useRef<HTMLDivElement>(null)
 
+  const [notifs, setNotifs] = useState<Notificacion[]>([])
+  const [noLeidas, setNoLeidas] = useState(0)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const notifRef = useRef<HTMLDivElement>(null)
+
+  useSocket()
+
+  const fetchNotifs = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/notifications")
+      if (res.ok) {
+        const data = await res.json()
+        setNotifs(data.notificaciones || [])
+        setNoLeidas(data.noLeidas || 0)
+      }
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => { fetchNotifs() }, [fetchNotifs])
+
   useEffect(() => {
-    if (!debouncedQuery || debouncedQuery.length < 1) {
-      setResults([])
-      setOpen(false)
-      return
-    }
+    const unsub = onNotificacion('notificacion', (data) => {
+      setNotifs(prev => [data.notificacion, ...prev])
+      setNoLeidas(prev => prev + 1)
+      playNotificationSound()
+    })
+    return unsub
+  }, [])
+
+  useEffect(() => {
+    if (!debouncedQuery || debouncedQuery.length < 1) { setResults([]); setOpen(false); return }
     setLoading(true)
-    fetch(`/api/search?q=${encodeURIComponent(debouncedQuery)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setResults(Array.isArray(data) ? data : [])
-        setOpen(true)
-      })
-      .catch(() => setResults([]))
-      .finally(() => setLoading(false))
+    apiFetch(`/api/search?q=${encodeURIComponent(debouncedQuery)}`)
+      .then(r => r.json()).then(data => { setResults(Array.isArray(data) ? data : []); setOpen(true) })
+      .catch(() => setResults([])).finally(() => setLoading(false))
   }, [debouncedQuery])
 
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", handleClick)
-    return () => document.removeEventListener("mousedown", handleClick)
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h)
+  }, [])
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false) }
+    document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h)
   }, [])
 
-  const handleSelect = useCallback(
-    (id: string) => {
-      setOpen(false)
-      setQuery("")
-      router.push(`/tickets/${id}`)
-    },
-    [router],
-  )
+  const handleSelect = useCallback((id: string) => { setOpen(false); setQuery(""); router.push(`/tickets/${id}`) }, [router])
+
+  const markAllRead = async () => {
+    await apiFetch("/api/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ marcarTodas: true }) })
+    setNoLeidas(0); setNotifs(prev => prev.map(n => ({ ...n, leido: true })))
+  }
+
+  const markRead = async (id: string) => {
+    await apiFetch("/api/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) })
+    setNotifs(prev => prev.map(n => n.id === id ? { ...n, leido: true } : n))
+    setNoLeidas(prev => Math.max(0, prev - 1))
+  }
+
+  const notifIcon: Record<string, string> = {
+    NUEVO_TICKET: "🎫", CAMBIO_ESTADO: "🔄", ASIGNACION: "👤", NUEVO_COMENTARIO: "💬",
+  }
+
+  const ticketIdFromCodigo = (codigo: string) => codigo.replace('TK-', '')
 
   return (
     <header className="flex h-[72px] items-center justify-between border-b bg-card/80 backdrop-blur-sm px-8 sticky top-0 z-10 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
@@ -86,21 +114,14 @@ export function Header() {
           <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary transition-colors" />
           <Input
             placeholder="Buscar por código, asunto, agente, solicitante..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onFocus={() => results.length > 0 && setOpen(true)}
+            value={query} onChange={e => setQuery(e.target.value)} onFocus={() => results.length > 0 && setOpen(true)}
             className="pl-11 h-11 bg-secondary/60 border-transparent focus-visible:bg-transparent focus-visible:ring-primary rounded-full text-sm font-medium transition-all"
           />
-          {loading && (
-            <Loader2 className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground animate-spin" />
-          )}
-
+          {loading && <Loader2 className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground animate-spin" />}
           {open && results.length > 0 && (
             <div className="absolute top-full mt-2 w-full bg-popover border border-border rounded-2xl shadow-xl z-50 overflow-hidden">
-              {results.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => handleSelect(r.id)}
+              {results.map(r => (
+                <button key={r.id} onClick={() => handleSelect(r.id)}
                   className="w-full px-4 py-3 flex items-start gap-3 hover:bg-accent transition-colors text-left border-b border-border/50 last:border-0"
                 >
                   <div className="flex-1 min-w-0">
@@ -111,29 +132,23 @@ export function Header() {
                         r.nivelPrioridad === "ALTA" ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" :
                         r.nivelPrioridad === "MEDIA" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" :
                         "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                      }`}>
-                        {r.nivelPrioridad}
-                      </span>
+                      }`}>{r.nivelPrioridad}</span>
                       <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
                         r.estado === "NUEVO" ? "bg-blue-100 text-blue-700" :
                         r.estado === "EN_PROGRESO" ? "bg-amber-100 text-amber-700" :
                         r.estado === "RESUELTO" ? "bg-emerald-100 text-emerald-700" :
                         "bg-slate-100 text-slate-700"
-                      }`}>
-                        {ESTADO_LABEL[r.estado] || r.estado}
-                      </span>
+                      }`}>{ESTADO_LABEL[r.estado] || r.estado}</span>
                     </div>
                     <p className="text-sm text-muted-foreground mt-0.5 truncate">{r.asunto}</p>
                     <p className="text-xs text-muted-foreground/70 mt-0.5">
-                      {r.solicitante.nombre} {r.solicitante.apellido}
-                      {r.agente ? ` → ${r.agente.nombre} ${r.agente.apellido}` : ""}
+                      {r.solicitante.nombre} {r.solicitante.apellido}{r.agente ? ` → ${r.agente.nombre} ${r.agente.apellido}` : ""}
                     </p>
                   </div>
                 </button>
               ))}
             </div>
           )}
-
           {open && query && !loading && results.length === 0 && (
             <div className="absolute top-full mt-2 w-full bg-popover border border-border rounded-2xl shadow-xl z-50 p-6 text-center">
               <p className="text-sm text-muted-foreground">Sin resultados para &quot;{query}&quot;</p>
@@ -145,17 +160,64 @@ export function Header() {
       <div className="flex items-center gap-6 ml-4">
         <Link href="/tickets/new">
           <Button className="rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-md shadow-primary/20 transition-all font-medium h-10 px-6 hidden md:flex items-center gap-2">
-            <Plus className="h-4 w-4" />
-            Nuevo Ticket
+            <Plus className="h-4 w-4" /> Nuevo Ticket
           </Button>
         </Link>
 
         <div className="h-6 w-px bg-border hidden md:block" />
 
-        <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:bg-muted/80 rounded-full h-10 w-10 transition-colors">
-          <Bell className="h-5 w-5" />
-          <span className="absolute right-2.5 top-2.5 flex h-2 w-2 rounded-full bg-destructive ring-2 ring-card" />
-        </Button>
+        <div className="relative" ref={notifRef}>
+          <Button variant="ghost" size="icon" onClick={() => setNotifOpen(!notifOpen)}
+            className="relative text-muted-foreground hover:bg-muted/80 rounded-full h-10 w-10 transition-colors"
+          >
+            <Bell className="h-5 w-5" />
+            {noLeidas > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex items-center justify-center h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold ring-2 ring-card">
+                {noLeidas > 9 ? "9+" : noLeidas}
+              </span>
+            )}
+          </Button>
+
+          {notifOpen && (
+            <div className="absolute right-0 top-full mt-2 w-96 bg-popover border border-border rounded-2xl shadow-xl z-50 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
+                <h3 className="text-sm font-semibold">Notificaciones</h3>
+                <div className="flex items-center gap-2">
+                  <Link href="/dashboard/notifications" onClick={() => setNotifOpen(false)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Ver todas
+                  </Link>
+                  {noLeidas > 0 && (
+                    <button onClick={markAllRead} className="text-xs text-primary hover:underline flex items-center gap-1">
+                      <CheckCheck className="h-3.5 w-3.5" /> Leídas
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="max-h-[360px] overflow-y-auto">
+                {notifs.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-muted-foreground">Sin notificaciones</div>
+                ) : (
+                  notifs.slice(0, 20).map(n => {
+                    const ticketId = n.ticket?.codigo ? ticketIdFromCodigo(n.ticket.codigo) : ''
+                    return (
+                      <button key={n.id} onClick={() => { markRead(n.id); router.push(`/tickets/${ticketId}`); setNotifOpen(false) }}
+                        className={`w-full px-4 py-3 text-left flex items-start gap-3 hover:bg-accent transition-colors border-b border-border/50 last:border-0 ${n.leido ? "" : "bg-accent/30"}`}
+                      >
+                        <span className="text-lg shrink-0 mt-0.5">{notifIcon[n.tipo] || "🔔"}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm ${n.leido ? "text-muted-foreground" : "text-foreground font-medium"}`}>{n.mensaje}</p>
+                          <p className="text-xs text-muted-foreground/60 mt-0.5">{new Date(n.fecha).toLocaleString()}</p>
+                        </div>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center gap-3 pl-2">
           <div className="flex flex-col items-end hidden sm:flex">

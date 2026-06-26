@@ -33,7 +33,7 @@ export default function LoginPage() {
         throw new Error(data.error || "Error al iniciar sesión")
       }
 
-      login(data.user)
+      login(data.user, data.token)
       router.push("/dashboard")
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Error al iniciar sesión")

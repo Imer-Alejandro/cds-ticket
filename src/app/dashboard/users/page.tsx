@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { fetchJson, apiFetch } from "@/lib/api"
 import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -33,17 +34,21 @@ export default function UsersPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/users").then(r => r.ok && r.json()).then(setUsers),
-      fetch("/api/roles").then(r => r.ok && r.json()).then(setRoles),
-      fetch("/api/departments").then(r => r.ok && r.json()).then(setDepartments),
-    ]).finally(() => setLoading(false))
+      fetchJson<Usuario[]>("/api/users", []),
+      fetchJson<Rol[]>("/api/roles", []),
+      fetchJson<Departamento[]>("/api/departments", []),
+    ]).then(([usersData, rolesData, departmentsData]) => {
+      setUsers(usersData)
+      setRoles(rolesData)
+      setDepartments(departmentsData)
+    }).finally(() => setLoading(false))
   }, [])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
     try {
-      const res = await fetch("/api/users", {
+      const res = await apiFetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form)
@@ -51,8 +56,7 @@ export default function UsersPage() {
       if (res.ok) {
         setShowForm(false)
         setForm({ nombre: "", apellido: "", correo: "", userName: "", password: "", telefono: "", rolId: "", departamentoId: "" })
-        const data = await fetch("/api/users").then(r => r.json())
-        setUsers(data)
+        setUsers(await fetchJson<Usuario[]>("/api/users", []))
       } else {
         const err = await res.json()
         alert(err.error)
@@ -67,7 +71,7 @@ export default function UsersPage() {
   const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar este usuario?")) return
     try {
-      await fetch(`/api/users/${id}`, { method: "DELETE" })
+      await apiFetch(`/api/users/${id}`, { method: "DELETE" })
       setUsers(users.filter(u => u.id !== id))
     } catch (error) {
       console.error("Error deleting user", error)

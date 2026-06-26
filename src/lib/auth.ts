@@ -1,5 +1,5 @@
 import { jwtVerify, SignJWT } from 'jose'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret_key_for_development_only_1234567890'
 const key = new TextEncoder().encode(JWT_SECRET)
@@ -21,14 +21,23 @@ export async function verifyToken(token: string) {
   }
 }
 
-export async function getSession() {
+async function resolveToken() {
   const cookieStore = await cookies()
   let token = cookieStore.get('auth_token')?.value
-  if (token) {
-    const payload = await verifyToken(token)
-    if (payload) return payload
+
+  if (!token) {
+    const headersList = await headers()
+    const auth = headersList.get('authorization')
+    if (auth?.startsWith('Bearer ')) token = auth.slice(7)
   }
-  return null
+
+  return token || null
+}
+
+export async function getSession() {
+  const token = await resolveToken()
+  if (!token) return null
+  return await verifyToken(token)
 }
 
 export async function getSessionFromRequest(request: Request) {

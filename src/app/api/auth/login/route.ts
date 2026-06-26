@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       path: '/'
     })
 
-    return NextResponse.json({ user: payload })
+    return NextResponse.json({ user: payload, token })
   } catch (error) {
     console.error('Login error:', error)
     return NextResponse.json(

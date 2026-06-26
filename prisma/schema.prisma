@@ -43,7 +43,8 @@ model Usuario {
   equiposSupervisor    Equipo[]             @relation("Supervisor")
   equipos              EquipoUsuario[]
   plantillasCreadas    PlantillaRespuesta[]
-  automatizaciones     Automatizacion[]
+   automatizaciones     Automatizacion[]
+   notificaciones       Notificacion[]
 }
 
 // Ticketing core
@@ -53,9 +54,10 @@ model Categoria {
   descripcion   String?
   colaDefaultId String? @db.Uuid
   
-  colaDefault   Cola?   @relation(fields: [colaDefaultId], references: [id])
-  tickets       Ticket[]
-  slas          Sla[]
+  colaDefault    Cola?               @relation(fields: [colaDefaultId], references: [id])
+  tickets        Ticket[]
+  slas           Sla[]
+  plantillas     PlantillaRespuesta[]
 }
 
 model Sla {
@@ -122,11 +124,12 @@ model Ticket {
   cola        Cola?        @relation(fields: [colaId], references: [id])
   sla         Sla?         @relation(fields: [slaId], references: [id])
   
-  comentarios Comentario[]
-  adjuntos    Adjunto[]
-  logs        LogTicket[]
-  etiquetas   TicketEtiqueta[]
-  encuesta    EncuestaSatisfaccion?
+  comentarios   Comentario[]
+  adjuntos      Adjunto[]
+  logs          LogTicket[]
+  etiquetas     TicketEtiqueta[]
+  encuesta      EncuestaSatisfaccion?
+  notificaciones Notificacion[]
 }
 
 model Comentario {
@@ -149,6 +152,8 @@ model Adjunto {
   url          String
   tipo         String
   nombre       String
+  data         String?  // base64 encoded content
+  tamaño       Int?
   fecha        DateTime @default(now())
   
   ticket     Ticket      @relation(fields: [ticketId], references: [id])
@@ -201,10 +206,12 @@ model PlantillaRespuesta {
   titulo        String
   contenido     String
   creadaPorId   String   @db.Uuid
+  categoriaId   String?  @db.Uuid
   esGlobal      Boolean  @default(false)
   fechaCreacion DateTime @default(now())
   
-  creador Usuario @relation(fields: [creadaPorId], references: [id])
+  creador   Usuario   @relation(fields: [creadaPorId], references: [id])
+  categoria Categoria? @relation(fields: [categoriaId], references: [id])
 }
 
 model Automatizacion {
@@ -217,6 +224,19 @@ model Automatizacion {
   creadaPorId String   @db.Uuid
   
   creador Usuario @relation(fields: [creadaPorId], references: [id])
+}
+
+model Notificacion {
+  id        String   @id @default(uuid()) @db.Uuid
+  usuarioId String   @db.Uuid
+  tipo      String   // NUEVO_TICKET, CAMBIO_ESTADO, ASIGNACION, NUEVO_COMENTARIO
+  mensaje   String
+  ticketId  String   @db.Uuid
+  leido     Boolean  @default(false)
+  fecha     DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+  ticket  Ticket  @relation(fields: [ticketId], references: [id])
 }
 
 model Configuracion {

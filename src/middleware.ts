@@ -1,30 +1,32 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { verifyToken } from '@/lib/auth'
 
-export function middleware(request: NextRequest) {
-  const token = request.cookies.get('auth_token')
+async function isAuthenticated(request: NextRequest) {
+  const token = request.cookies.get('auth_token')?.value
+  if (!token) return false
+  const payload = await verifyToken(token)
+  return payload !== null
+}
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const authenticated = await isAuthenticated(request)
 
-  // Redirect root to login or dashboard
   if (pathname === '/') {
-    if (token) {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
-    }
-    return NextResponse.redirect(new URL('/login', request.url))
+    return NextResponse.redirect(
+      new URL(authenticated ? '/dashboard' : '/login', request.url)
+    )
   }
 
-  // Protected routes
-  if (pathname.startsWith('/dashboard')) {
-    if (!token) {
-      return NextResponse.redirect(new URL('/login', request.url))
-    }
+  if (pathname.startsWith('/dashboard') && !authenticated) {
+    const response = NextResponse.redirect(new URL('/login', request.url))
+    response.cookies.delete('auth_token')
+    return response
   }
 
-  // Redirect authenticated users away from login
-  if (pathname === '/login') {
-    if (token) {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
-    }
+  if (pathname === '/login' && authenticated) {
+    return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
   return NextResponse.next()
