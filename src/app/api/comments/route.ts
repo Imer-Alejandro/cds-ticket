@@ -33,7 +33,7 @@ export async function POST(request: Request) {
 
     if (data.adjuntos && Array.isArray(data.adjuntos)) {
       await prisma.adjunto.createMany({
-        data: data.adjuntos.map((a: any) => ({
+        data: data.adjuntos.map((a: { nombre: string; tipo: string; url?: string; data?: string; tamaño?: number }) => ({
           ticketId: data.ticketId,
           comentarioId: comment.id,
           nombre: a.nombre,
