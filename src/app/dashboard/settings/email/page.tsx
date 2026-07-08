@@ -152,6 +152,8 @@ export default function EmailSettingsPage() {
           {saving ? 'Guardando...' : 'Guardar configuración'}
         </Button>
       </div>
+
+      <ConfigurationGuide />
     </div>
   )
 }
@@ -171,5 +173,41 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <label className="text-xs font-medium text-muted-foreground">{label}</label>
       {children}
     </div>
+  )
+}
+
+// Guía de configuración
+function ConfigurationGuide() {
+  return (
+    <Card className="rounded-2xl border-border/50 shadow-sm bg-blue-50/50 border-blue-200">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+          <span className="text-base">📧</span> Guía de Configuración
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div>
+          <h4 className="font-medium mb-1">Para Gmail:</h4>
+          <ul className="list-disc list-inside space-y-1 text-muted-foreground text-xs">
+            <li>IMAP Host: <code className="bg-white px-1 rounded">imap.gmail.com</code></li>
+            <li>SMTP Host: <code className="bg-white px-1 rounded">smtp.gmail.com</code></li>
+            <li>Usa contraseña de aplicación (no la de tu cuenta)</li>
+          </ul>
+        </div>
+        <div>
+          <h4 className="font-medium mb-1">Para Microsoft 365:</h4>
+          <ul className="list-disc list-inside space-y-1 text-muted-foreground text-xs">
+            <li>IMAP Host: <code className="bg-white px-1 rounded">imap.outlook.com</code></li>
+            <li>SMTP Host: <code className="bg-white px-1 rounded">smtp-mail.outlook.com</code></li>
+            <li>Puerto SMTP: 587 (con TLS habilitado)</li>
+          </ul>
+        </div>
+        <div className="pt-2 border-t border-blue-200">
+          <p className="text-xs text-muted-foreground">
+            <strong>Nota:</strong> Los correos se procesarán automáticamente cada X segundos (intervalo configurado) y se convertirán en tickets.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
