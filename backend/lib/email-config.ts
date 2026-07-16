@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client'
-
-const prisma = new PrismaClient()
+import { getPrisma } from './prisma'
 
 export interface EmailConfig {
   enabled: boolean
@@ -36,7 +34,7 @@ const DEFAULTS: EmailConfig = {
   smtpPass: '',
   fromAddress: '',
   fromName: 'Help Desk IT',
-  checkInterval: 60,
+  checkInterval: 10,
   defaultCategoriaId: '',
 }
 
@@ -47,6 +45,7 @@ const KEYS: (keyof EmailConfig)[] = [
 ]
 
 export async function loadEmailConfig(): Promise<EmailConfig> {
+  const prisma = getPrisma()
   const rows = await prisma.configuracion.findMany({
     where: { grupo: 'email' },
   })

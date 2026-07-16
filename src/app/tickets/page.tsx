@@ -61,7 +61,7 @@ export default function TicketsPage() {
   const hasFilters = search || estadoFilter || prioridadFilter
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-2 sm:px-4 lg:px-6 py-4 sm:py-6">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-muted-foreground">
         <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>

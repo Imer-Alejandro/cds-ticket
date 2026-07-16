@@ -15,9 +15,12 @@ export async function POST(request: Request) {
 
     const ticket = await prisma.ticket.findUnique({
       where: { id: data.ticketId },
-      select: { id: true, codigo: true, solicitanteId: true, agenteId: true },
+      select: { id: true, codigo: true, solicitanteId: true, agenteId: true, estado: true },
     })
     if (!ticket) return NextResponse.json({ error: 'Ticket no encontrado' }, { status: 404 })
+
+    const rolNombre = (session as { rolNombre?: string }).rolNombre
+    const esMiembroEquipo = rolNombre === 'Agente' || rolNombre === 'Administrador'
 
     const comment = await prisma.comentario.create({
       data: {
@@ -42,6 +45,26 @@ export async function POST(request: Request) {
           data: a.data,
           tamaño: a.tamaño,
         })),
+      })
+    }
+
+    if (esMiembroEquipo && ticket.agenteId !== (session.id as string)) {
+      const updateData: { agenteId: string; estado?: string } = { agenteId: session.id as string }
+      if (ticket.estado === 'NUEVO') updateData.estado = 'ASIGNADO'
+
+      await prisma.ticket.update({
+        where: { id: data.ticketId },
+        data: updateData,
+      })
+
+      await prisma.logTicket.create({
+        data: {
+          ticketId: data.ticketId,
+          usuarioId: session.id as string,
+          accion: 'ASIGNACION',
+          valorAnterior: ticket.agenteId || 'Sin asignar',
+          valorNuevo: session.id as string,
+        },
       })
     }
 

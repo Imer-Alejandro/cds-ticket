@@ -47,6 +47,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const ticket = await prisma.ticket.findUnique({ where: { id } })
     if (!ticket) return NextResponse.json({ error: 'Ticket no encontrado' }, { status: 404 })
 
+    const rolNombre = (session as { rolNombre?: string }).rolNombre
+    const esMiembroEquipo = rolNombre === 'Agente' || rolNombre === 'Administrador'
+
     const updateData: any = {}
     const logs: { accion: string; valorAnterior?: string; valorNuevo?: string }[] = []
 
@@ -57,6 +60,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (data.estado === 'CERRADO') updateData.fechaCierre = new Date()
     }
     if (data.agenteId && data.agenteId !== ticket.agenteId) {
+      if (!esMiembroEquipo) {
+        return NextResponse.json({ error: 'No tienes permisos para reasignar tickets' }, { status: 403 })
+      }
       updateData.agenteId = data.agenteId
       logs.push({ accion: 'ASIGNACION', valorAnterior: ticket.agenteId || 'Sin asignar', valorNuevo: data.agenteId })
     }

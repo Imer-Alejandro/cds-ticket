@@ -156,7 +156,7 @@ export default function TicketDetailPage() {
   const acciones = ACCIONES[ticket.estado]?.filter(a => puedeAccion(a)) || []
 
   return (
-    <div className="space-y-6 max-w-6xl">
+    <div className="space-y-6 max-w-6xl px-2 sm:px-4 lg:px-6 py-4 sm:py-6">
       {/* Breadcrumb sutil */}
       <nav className="flex items-center gap-2 text-sm text-muted-foreground">
         <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
@@ -461,7 +461,7 @@ export default function TicketDetailPage() {
               ) : (
                 <p className="text-xs text-muted-foreground italic">Sin agente asignado</p>
               )}
-              {(esAdmin || ticket.estado === "NUEVO") && (
+              {esAgente && (
                 <select value={ticket.agente?.id || ""}
                   onChange={e => { if (e.target.value) updateTicket({ agenteId: e.target.value, estado: ticket.estado === "NUEVO" ? "ASIGNADO" : undefined }) }}
                   className="flex h-9 w-full rounded-xl border border-input bg-transparent px-3 text-xs"

@@ -57,6 +57,10 @@ export async function POST(request: Request) {
     })
     if (!categoria) return NextResponse.json({ error: 'Categoría no encontrada' }, { status: 404 })
 
+    const rolNombre = (session as { rolNombre?: string }).rolNombre
+    const esMiembroEquipo = rolNombre === 'Agente' || rolNombre === 'Administrador'
+    const agenteIdAsignado = esMiembroEquipo ? (data.agenteId || (session.id as string)) : null
+
     const count = await prisma.ticket.count()
     const codigo = `TK-${String(count + 1).padStart(5, '0')}`
 
@@ -69,9 +73,10 @@ export async function POST(request: Request) {
         codigo,
         asunto: data.asunto,
         descripcion: data.descripcion,
-        estado: 'NUEVO',
+        estado: agenteIdAsignado ? 'ASIGNADO' : 'NUEVO',
         nivelPrioridad: data.nivelPrioridad || 'MEDIA',
         solicitanteId: data.solicitanteId || session.id as string,
+        agenteId: agenteIdAsignado,
         categoriaId: data.categoriaId,
         colaId: categoria.colaDefaultId,
         slaId: sla?.id || null,
@@ -91,6 +96,19 @@ export async function POST(request: Request) {
         valorNuevo: 'Ticket creado',
       },
     })
+
+    if (agenteIdAsignado) {
+      await prisma.logTicket.create({
+        data: {
+          ticketId: ticket.id,
+          usuarioId: session.id as string,
+          accion: 'ASIGNACION',
+          valorAnterior: 'Sin asignar',
+          valorNuevo: agenteIdAsignado,
+        },
+      })
+      await createNotification(agenteIdAsignado, 'ASIGNACION', `Has sido asignado al ticket ${ticket.codigo}: ${ticket.asunto}`, ticket.id)
+    }
 
     if (data.adjuntos && Array.isArray(data.adjuntos)) {
       await prisma.adjunto.createMany({

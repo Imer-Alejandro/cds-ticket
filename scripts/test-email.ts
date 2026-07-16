@@ -52,7 +52,7 @@ async function testEmailConfiguration() {
       const mailbox = await imap.mailboxOpen(config.imapFolder)
       console.log(`✅ Mailbox abierto: ${config.imapFolder}`)
       console.log(`   - Mensajes totales: ${mailbox.exists}`)
-      console.log(`   - Mensajes sin leer: ${mailbox.unseen}`)
+      console.log(`   - Mensajes sin leer: ${'unseen' in mailbox ? String((mailbox as { unseen?: number }).unseen ?? 0) : 'N/A'}`)
       console.log()
 
       // Test 3: Conectar a SMTP

@@ -5,7 +5,8 @@ import dotenv from 'dotenv'
 import { initSocketServer } from './src/socket'
 import { startMailListener } from './src/mail'
 
-dotenv.config({ path: '.env.local' })
+dotenv.config()
+dotenv.config({ path: '.env.local', override: true })
 
 const app = express()
 const httpServer = createServer(app)

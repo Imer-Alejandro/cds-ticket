@@ -85,7 +85,7 @@ async function getTicketsPorDia(desde: Date) {
     if (t.fechaResolucion) {
       const diaRes = t.fechaResolucion.toISOString().slice(0, 10)
       if (!mapa.has(diaRes)) mapa.set(diaRes, { creados: 0, resueltos: 0, cerrados: 0 })
-      mapa.get(diaRes)!.resueltos++
+      mapa.get(diaRes)!.resueltos++ 
     }
     if (t.fechaCierre) {
       const diaCierre = t.fechaCierre.toISOString().slice(0, 10)

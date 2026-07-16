@@ -65,6 +65,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ user: payload, token })
   } catch (error) {
     console.error('Login error:', error)
+
+    const message = error instanceof Error ? error.message : String(error)
+    const isDatabaseAuthError = /authenticationfailed|password authentication failed|invalid password|sasl|scram|driveradaptererror/i.test(message)
+
+    if (isDatabaseAuthError) {
+      return NextResponse.json(
+        {
+          error: 'No se pudo conectar con la base de datos. Verifica la configuración de DATABASE_URL y las credenciales.'
+        },
+        { status: 503 }
+      )
+    }
+
     return NextResponse.json(
       { error: 'Error interno del servidor' },
       { status: 500 }

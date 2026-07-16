@@ -1,13 +1,13 @@
 import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
-import { PrismaClient } from '@prisma/client'
+import { getPrisma } from '../lib/prisma'
 import { loadEmailConfig, type EmailConfig } from '../lib/email-config'
 import { notifyUsers } from './socket'
 
-const prisma = new PrismaClient()
 let intervalHandle: ReturnType<typeof setInterval> | null = null
 
 export async function checkMail(cfg?: EmailConfig) {
+  const prisma = getPrisma()
   const config = cfg || (await loadEmailConfig())
   if (!config.enabled || !config.imapHost || !config.imapUser) return
 
@@ -136,8 +136,8 @@ export function startMailListener(cfg?: EmailConfig) {
   if (cfg) {
     if (cfg.enabled) {
       checkMail(cfg)
-      intervalHandle = setInterval(() => checkMail(cfg), (cfg.checkInterval || 60) * 1000)
-      console.log('[Mail] Listener iniciado con intervalo de', cfg.checkInterval || 60, 'segundos')
+      intervalHandle = setInterval(() => checkMail(cfg), (cfg.checkInterval || 10) * 1000)
+      console.log('[Mail] Listener iniciado con intervalo de', cfg.checkInterval || 10, 'segundos')
     }
     return
   }
@@ -145,8 +145,8 @@ export function startMailListener(cfg?: EmailConfig) {
   loadEmailConfig().then((c) => {
     if (c.enabled) {
       checkMail(c)
-      intervalHandle = setInterval(() => checkMail(c), (c.checkInterval || 60) * 1000)
-      console.log('[Mail] Listener iniciado con intervalo de', c.checkInterval || 60, 'segundos')
+      intervalHandle = setInterval(() => checkMail(c), (c.checkInterval || 10) * 1000)
+      console.log('[Mail] Listener iniciado con intervalo de', c.checkInterval || 10, 'segundos')
     }
   })
 }

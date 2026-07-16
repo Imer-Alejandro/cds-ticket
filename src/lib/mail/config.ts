@@ -34,7 +34,7 @@ const DEFAULTS: EmailConfig = {
   smtpPass: '',
   fromAddress: '',
   fromName: 'Help Desk IT',
-  checkInterval: 60,
+  checkInterval: 15,
   defaultCategoriaId: '',
 }
 
