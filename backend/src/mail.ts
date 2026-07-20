@@ -3,6 +3,7 @@ import { simpleParser } from 'mailparser'
 import { getPrisma } from '../lib/prisma'
 import { loadEmailConfig, type EmailConfig } from '../lib/email-config'
 import { notifyUsers } from './socket'
+import { resolveEmailCategoriaId, resolveEmailRoleId } from '../../src/lib/mail/helpers'
 
 let intervalHandle: ReturnType<typeof setInterval> | null = null
 
@@ -42,7 +43,11 @@ export async function checkMail(cfg?: EmailConfig) {
           let usuario = await prisma.usuario.findUnique({ where: { correo: fromEmail } })
           if (!usuario) {
             const fromName = parsed.from?.value?.[0]?.name || fromEmail.split('@')[0]
-            const defaultRole = await prisma.rol.findFirst({ where: { nombre: 'Usuario' } })
+            const defaultRoleId = await resolveEmailRoleId(prisma)
+            if (!defaultRoleId) {
+              console.error('[Mail] No default role found for incoming email')
+              continue
+            }
             usuario = await prisma.usuario.create({
               data: {
                 nombre: fromName,
@@ -50,7 +55,7 @@ export async function checkMail(cfg?: EmailConfig) {
                 correo: fromEmail,
                 userName: fromEmail.split('@')[0] + '_' + Date.now(),
                 password: null,
-                rolId: defaultRole?.id || '',
+                rolId: defaultRoleId,
                 departamentoId: null,
               },
             })
@@ -62,7 +67,12 @@ export async function checkMail(cfg?: EmailConfig) {
           const lastTicket = await prisma.ticket.findFirst({ orderBy: { codigo: 'desc' } })
           const nextNum = lastTicket ? parseInt(lastTicket.codigo.replace('TK-', ''), 10) + 1 : 1
           const codigo = `TK-${String(nextNum).padStart(5, '0')}`
-          const catId = config.defaultCategoriaId || ''
+          const catId = await resolveEmailCategoriaId({ defaultCategoriaId: config.defaultCategoriaId || '' } as any, prisma)
+
+          if (!catId) {
+            console.error('[Mail] No default category found for incoming email')
+            continue
+          }
 
           const ticket = await prisma.ticket.create({
             data: {

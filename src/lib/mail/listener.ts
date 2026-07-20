@@ -1,8 +1,10 @@
-import { ImapFlow } from 'imapflow'
+import { ImapFlow, type FetchMessageObject } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import prisma from '@/lib/prisma'
 import { loadEmailConfig } from './config'
 import nodemailer from 'nodemailer'
+import { resolveEmailCategoriaId } from './helpers'
+import { createNotification } from '@/lib/notifications'
 
 export interface ParsedEmail {
   from: string
@@ -44,8 +46,9 @@ export async function processIncomingEmails() {
     let mailbox = await client.mailboxOpen(config.imapFolder)
     console.log(`Mailbox opened: ${config.imapFolder}, messages: ${mailbox.exists}`)
 
-    // Buscar correos sin leer
-    let messages = await client.search({ unseen: true })
+    // Buscar solo correos sin leer
+    const searchResult = await client.search({ seen: false })
+    const messages = Array.isArray(searchResult) ? searchResult : []
 
     if (messages.length === 0) {
       console.log('No unread messages found')
@@ -53,14 +56,14 @@ export async function processIncomingEmails() {
       return
     }
 
-    // Procesar últimos 10 correos
-    for (let i = Math.max(0, messages.length - 10); i < messages.length; i++) {
+    // Procesar los correos sin leer de forma secuencial
+    for (let i = Math.max(0, messages.length - 20); i < messages.length; i++) {
       const message = messages[i]
       try {
         // Obtener el mensaje completo
-        let msg = await client.fetchOne(message, { source: true })
+        const msg = await client.fetchOne(message, { source: true })
         
-        if (msg.source) {
+        if (msg && 'source' in msg && msg.source) {
           // Parsear el correo
           const parsed = await simpleParser(msg.source)
           
@@ -68,7 +71,7 @@ export async function processIncomingEmails() {
           await createTicketFromEmail(parsed, config.defaultCategoriaId)
           
           // Marcar como leído
-          await client.setFlags(message, ['\\Seen'])
+          await client.messageFlagsAdd(message, ['\\Seen'])
         }
       } catch (error) {
         console.error(`Error processing message ${message}:`, error)
@@ -96,48 +99,50 @@ async function createTicketFromEmail(
   try {
     // Extraer email del remitente
     const fromEmail = email.from?.text || email.from?.address || 'desconocido@example.com'
-    
-    // Obtener o crear usuario desde el correo del remitente
-    let solicitante = await prisma.usuario.findUnique({
-      where: { correo: fromEmail },
+
+    // Evitar crear usuarios por cada correo externo. Se reutiliza un usuario interno de soporte
+    // para que los tickets queden asociados a un solicitante estable y no se llenen de cuentas.
+    let solicitante = await prisma.usuario.findFirst({
+      where: { correo: { equals: fromEmail, mode: 'insensitive' } },
     })
 
     if (!solicitante) {
-      // Crear usuario automáticamente
-      const emailParts = fromEmail.split('@')[0]
-      const nameParts = emailParts.split(/[._-]/)
-      const nombre = nameParts[0] || 'Usuario'
-      const apellido = nameParts[1] || 'Externo'
-      
-      // Buscar rol por defecto
-      const rolDefecto = await prisma.rol.findFirst()
-      
-      if (!rolDefecto) {
-        console.error('No default role found')
-        return
-      }
-
-      solicitante = await prisma.usuario.create({
-        data: {
-          correo: fromEmail,
-          nombre: nombre.charAt(0).toUpperCase() + nombre.slice(1),
-          apellido: apellido.charAt(0).toUpperCase() + apellido.slice(1),
-          userName: fromEmail.split('@')[0],
-          rolId: rolDefecto.id,
-        },
+      const fallbackUser = await prisma.usuario.findFirst({
+        where: { correo: { contains: 'soporte', mode: 'insensitive' } },
       })
-      console.log(`Created new user from email: ${fromEmail}`)
+
+      if (!fallbackUser) {
+        const fallbackRole = await prisma.rol.findFirst({ where: { nombre: 'Usuario' } })
+        if (!fallbackRole) {
+          console.error('No fallback user or role found for incoming email')
+          return
+        }
+
+        solicitante = await prisma.usuario.create({
+          data: {
+            correo: `soporte+email@${fromEmail.split('@')[1] || 'local'}`,
+            nombre: 'Soporte',
+            apellido: 'Correo',
+            userName: `soporte_email_${Date.now()}`,
+            rolId: fallbackRole.id,
+          },
+        })
+      } else {
+        solicitante = fallbackUser
+      }
     }
 
     // Obtener categoría por defecto
-    let categoriaId = defaultCategoryId
+    let categoriaId = defaultCategoryId?.trim() || null
     if (!categoriaId) {
-      const categoria = await prisma.categoria.findFirst()
-      if (!categoria) {
-        console.error('No default category found')
-        return
-      }
-      categoriaId = categoria.id
+      categoriaId = await resolveEmailCategoriaId({ defaultCategoriaId: '' } as any, prisma)
+    } else {
+      categoriaId = await resolveEmailCategoriaId({ defaultCategoriaId: categoriaId } as any, prisma)
+    }
+
+    if (!categoriaId) {
+      console.error('No default category found')
+      return
     }
 
     // Crear ticket
@@ -155,12 +160,40 @@ async function createTicketFromEmail(
       },
     })
 
+    await prisma.logTicket.create({
+      data: {
+        ticketId: ticket.id,
+        usuarioId: solicitante.id,
+        accion: 'CREACION',
+        valorNuevo: 'Ticket creado desde correo',
+      },
+    })
+
+    // Notificar a agentes y usuarios relevantes
+    const agentes = await prisma.usuario.findMany({
+      where: { rol: { nombre: { in: ['Agente', 'Administrador'] } } },
+      select: { id: true },
+    })
+
+    for (const agente of agentes) {
+      await createNotification(
+        agente.id,
+        'NUEVO_TICKET',
+        `Nuevo ticket ${ticket.codigo}: ${ticket.asunto}`,
+        ticket.id,
+      )
+    }
+
     console.log(`Created ticket ${codigo} from email: ${fromEmail}`)
     return ticket
   } catch (error) {
     console.error('Error creating ticket from email:', error)
     throw error
   }
+}
+
+export function startMailListener() {
+  void processIncomingEmails()
 }
 
 export async function sendEmailReply(ticketId: string, message: string) {

@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { Plus, Search, Filter, Clock } from "lucide-react"
+import { useSocket, onNotificacion } from "@/hooks/useSocket"
+import { playNotificationSound } from "@/lib/sound"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { 
@@ -11,18 +13,37 @@ import {
 export default function TicketsPage() {
   const [tickets, setTickets] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
+
+  useSocket()
+
+  const loadTickets = async () => {
+    try {
+      const response = await fetch("/api/tickets")
+      const data = await response.json()
+      setTickets(Array.isArray(data) ? data : [])
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    fetch("/api/tickets")
-      .then(r => r.json())
-      .then(data => {
-        setTickets(Array.isArray(data) ? data : [])
-        setLoading(false)
-      })
-      .catch(err => {
-        console.error(err)
-        setLoading(false)
-      })
+    loadTickets()
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = onNotificacion('nuevoTicket', (data: any) => {
+      if (data?.ticket?.id) {
+        setHighlightedId(data.ticket.id)
+        playNotificationSound()
+        setTimeout(() => setHighlightedId(null), 2500)
+        loadTickets()
+      }
+    })
+
+    return unsubscribe
   }, [])
 
   const getStatusColor = (status: string) => {
@@ -136,7 +157,7 @@ export default function TicketsPage() {
                 </TableRow>
               ) : (
                 displayTickets.map((ticket) => (
-                  <TableRow key={ticket.id} className="hover:bg-muted/30 transition-colors border-border/50 group">
+                  <TableRow key={ticket.id} className={`hover:bg-muted/30 transition-colors border-border/50 group ${highlightedId === ticket.id ? 'bg-amber-100/70 dark:bg-amber-900/20 animate-pulse' : ''}`}>
                     <TableCell className="font-medium text-primary">
                       {ticket.codigo}
                     </TableCell>

@@ -2,7 +2,7 @@ import { createServer } from 'http'
 import { parse } from 'url'
 import next from 'next'
 import { initSocketServer } from './src/lib/socket-server'
-import { startMailListener } from './src/lib/mail/listener'
+import { processIncomingEmails, startMailListener } from './src/lib/mail/listener'
 
 const dev = process.env.NODE_ENV !== 'production'
 const port = parseInt(process.env.PORT || '3000', 10)
