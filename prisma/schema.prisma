@@ -66,6 +66,7 @@ model Sla {
   prioridad         String // CRITICA, ALTA, MEDIA, BAJA
   minutosRespuesta  Int
   minutosResolucion Int
+  minutosPendiente  Int?
 
   categoria Categoria @relation(fields: [categoriaId], references: [id])
   tickets   Ticket[]
@@ -116,6 +117,7 @@ model Ticket {
   origen                String // WEB, CORREO
   fechaCreacion         DateTime  @default(now())
   fechaPrimeraRespuesta DateTime?
+  fechaPendiente        DateTime?
   fechaResolucion       DateTime?
   fechaCierre           DateTime?
 
