@@ -35,7 +35,15 @@ export async function GET(request: Request) {
         { agente: { nombre: { contains: search, mode: 'insensitive' } } },
       ]
     }
-    if (estado) where.estado = estado
+    if (estado) {
+      if (estado === 'ABIERTOS') {
+        where.estado = { in: ['NUEVO', 'ASIGNADO', 'EN_PROGRESO', 'PENDIENTE'] }
+      } else if (estado !== 'TODOS') {
+        where.estado = estado
+      }
+    } else {
+      where.estado = { not: 'ELIMINADO' }
+    }
     if (prioridad) where.nivelPrioridad = prioridad
     if (categoriaId) where.categoriaId = categoriaId
     if (agenteId) where.agenteId = agenteId

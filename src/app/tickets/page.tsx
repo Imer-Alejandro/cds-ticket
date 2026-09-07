@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Suspense } from "react"
 import { Plus, Search, ArrowUpDown, Loader2, FilterX, ChevronLeft, ChevronRight, Inbox, UserCheck, Ticket } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -32,22 +33,35 @@ interface TicketListResponse {
   totalPages: number
 }
 
-const ESTADOS = ["", "NUEVO", "ASIGNADO", "EN_PROGRESO", "RESUELTO", "CERRADO"]
+const ESTADOS = ["", "ABIERTOS", "NUEVO", "ASIGNADO", "EN_PROGRESO", "PENDIENTE", "RESUELTO", "CERRADO", "ELIMINADO"]
 const PRIORIDADES = ["", "CRITICA", "ALTA", "MEDIA", "BAJA"]
 
 const ESTADO_LABEL: Record<string, string> = {
-  NUEVO: "Nuevo", ASIGNADO: "Asignado", EN_PROGRESO: "En Progreso", RESUELTO: "Resuelto", CERRADO: "Cerrado",
+  ABIERTOS: "Abiertos (Todos)", NUEVO: "Nuevo", ASIGNADO: "Asignado", EN_PROGRESO: "En Progreso", PENDIENTE: "Pendiente", RESUELTO: "Resuelto", CERRADO: "Cerrado", ELIMINADO: "Eliminado",
 }
 
 type VistaFilter = "todos" | "mios" | "sinAsignar"
 
 export default function TicketsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center py-20 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin mr-2" /> Cargando...
+      </div>
+    }>
+      <TicketsContent />
+    </Suspense>
+  )
+}
+
+function TicketsContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user } = useAuthStore()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
-  const [estadoFilter, setEstadoFilter] = useState("")
+  const [estadoFilter, setEstadoFilter] = useState(searchParams.get("estado") || "")
   const [prioridadFilter, setPrioridadFilter] = useState("")
   const [sortField, setSortField] = useState("fechaCreacion")
   const [sortDir, setSortDir] = useState("desc")
@@ -59,6 +73,13 @@ export default function TicketsPage() {
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const [fetchTick, setFetchTick] = useState(0)
   const [view, setView] = useState<"table" | "kanban">("table")
+
+  useEffect(() => {
+    const st = searchParams.get("estado")
+    if (st !== null) {
+      setEstadoFilter(st)
+    }
+  }, [searchParams])
 
   const pageSize = view === "kanban" ? 100 : 20
 

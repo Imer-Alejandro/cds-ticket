@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -9,11 +9,12 @@ import { useAuthStore } from "@/store/useAuthStore"
 import { formatDateShort, formatDateTime } from "@/lib/utils"
 import { SlaBar } from "@/components/tickets/SlaBar"
 import { Modal } from "@/components/ui/modal"
+import { useSocket, onNotificacion } from "@/hooks/useSocket"
 import {
   ArrowLeft, MessageSquare, RotateCcw, User, Tag, AlertCircle,
   Send, Loader2, CheckCircle2, XCircle, ChevronRight, Ticket,
   Paperclip, Clock, UserCheck, Play, History, FileText,
-  ChevronDown, Sparkles, Pencil,
+  ChevronDown, Sparkles, Pencil, Pause, Trash2, Eye, Download,
 } from "lucide-react"
 
 interface AdjuntoData { id: string; nombre: string; tipo: string; url: string; data: string | null; tamaño: number | null }
@@ -38,10 +39,12 @@ interface Plantilla { id: string; titulo: string; contenido: string; categoriaId
 
 const ESTADOS: Record<string, { label: string; desc: string; color: string; light: string }> = {
   NUEVO: { label: "Nuevo", desc: "Pendiente de asignación", color: "text-blue-600 bg-blue-50 border-blue-200", light: "bg-blue-500" },
-  ASIGNADO: { label: "Asignado", desc: "Agente asignado, pendiente de inicio", color: "text-amber-600 bg-amber-50 border-amber-200", light: "bg-amber-500" },
+  ASIGNADO: { label: "Asignado", desc: "Agente asignado, pendiente de inicio", color: "text-indigo-600 bg-indigo-50 border-indigo-200", light: "bg-indigo-500" },
   EN_PROGRESO: { label: "En Progreso", desc: "En proceso de resolución", color: "text-orange-600 bg-orange-50 border-orange-200", light: "bg-orange-500" },
+  PENDIENTE: { label: "Pendiente", desc: "En espera de información o tercero", color: "text-purple-600 bg-purple-50 border-purple-200", light: "bg-purple-500" },
   RESUELTO: { label: "Resuelto", desc: "Solución aplicada, esperando confirmación", color: "text-emerald-600 bg-emerald-50 border-emerald-200", light: "bg-emerald-500" },
   CERRADO: { label: "Cerrado", desc: "Ticket finalizado", color: "text-slate-600 bg-slate-100 border-slate-200", light: "bg-slate-400" },
+  ELIMINADO: { label: "Eliminado", desc: "Ticket eliminado/archivado", color: "text-rose-700 bg-rose-50 border-rose-200", light: "bg-rose-500" },
 }
 
 const PRIORIDAD: Record<string, { label: string; color: string }> = {
@@ -57,19 +60,34 @@ const ACCIONES: Record<string, Accion[]> = {
   NUEVO: [
     { label: "Asignarme", icon: UserCheck, action: "TOMADO", color: "bg-amber-500 hover:bg-amber-600", desc: "Tomar el ticket y empezar a trabajar", role: "agente" },
     { label: "Asignar a...", icon: User, action: "ASIGNADO", color: "bg-slate-500 hover:bg-slate-600", desc: "Asignar a otro agente", role: "admin" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "agente" },
   ],
   ASIGNADO: [
     { label: "Iniciar", icon: Play, action: "EN_PROGRESO", color: "bg-blue-500 hover:bg-blue-600", desc: "Comenzar a trabajar en el ticket", role: "todos" },
+    { label: "Poner Pendiente", icon: Pause, action: "PENDIENTE", color: "bg-purple-500 hover:bg-purple-600", desc: "Poner en espera de información", role: "agente" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "agente" },
   ],
   EN_PROGRESO: [
     { label: "Resolver", icon: CheckCircle2, action: "RESUELTO", color: "bg-emerald-500 hover:bg-emerald-600", desc: "Marcar como resuelto", role: "todos" },
+    { label: "Poner Pendiente", icon: Pause, action: "PENDIENTE", color: "bg-purple-500 hover:bg-purple-600", desc: "Poner en espera de información", role: "agente" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "agente" },
+  ],
+  PENDIENTE: [
+    { label: "Reanudar", icon: Play, action: "EN_PROGRESO", color: "bg-blue-500 hover:bg-blue-600", desc: "Reanudar trabajo en el ticket", role: "todos" },
+    { label: "Resolver", icon: CheckCircle2, action: "RESUELTO", color: "bg-emerald-500 hover:bg-emerald-600", desc: "Marcar como resuelto", role: "todos" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "agente" },
   ],
   RESUELTO: [
     { label: "Cerrar", icon: XCircle, action: "CERRADO", color: "bg-slate-500 hover:bg-slate-600", desc: "Confirmar y cerrar ticket", role: "todos" },
     { label: "Reabrir", icon: RotateCcw, action: "EN_PROGRESO", color: "bg-orange-500 hover:bg-orange-600", desc: "Volver a abrir el ticket", role: "admin" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "admin" },
   ],
   CERRADO: [
     { label: "Reabrir", icon: RotateCcw, action: "EN_PROGRESO", color: "bg-orange-500 hover:bg-orange-600", desc: "Reabrir ticket cerrado", role: "admin" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "admin" },
+  ],
+  ELIMINADO: [
+    { label: "Restaurar", icon: RotateCcw, action: "EN_PROGRESO", color: "bg-emerald-500 hover:bg-emerald-600", desc: "Restaurar ticket a En Progreso", role: "admin" },
   ],
 }
 
@@ -90,15 +108,38 @@ export default function TicketDetailPage() {
   const [editAsunto, setEditAsunto] = useState("")
   const [editDescripcion, setEditDescripcion] = useState("")
   const [savingEdit, setSavingEdit] = useState(false)
+  const [previewImage, setPreviewImage] = useState<AdjuntoData | null>(null)
+
+  useSocket()
 
   const esAgente = user?.rolNombre === "Administrador" || user?.rolNombre === "Agente"
   const esAdmin = user?.rolNombre === "Administrador"
   const esSolicitante = ticket?.solicitanteId === user?.id
   const esAgenteAsignado = ticket?.agente?.id === user?.id
 
+  const refreshTicket = useCallback(async () => {
+    if (!params.id) return
+    const r = await fetch(`/api/tickets/${params.id}`)
+    if (r.ok) setTicket(await r.json())
+  }, [params.id])
+
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  useEffect(() => {
+    const unsubUpdate = onNotificacion('ticketUpdated', (data: any) => {
+      if (data?.id === params.id || data?.ticket?.id === params.id) {
+        refreshTicket()
+      }
+    })
+    const unsubNotif = onNotificacion('notificacion', (data: any) => {
+      if (data?.notificacion?.ticket?.id === params.id) {
+        refreshTicket()
+      }
+    })
+    return () => { unsubUpdate(); unsubNotif() }
+  }, [params.id, refreshTicket])
 
   useEffect(() => {
     if (!params.id) return
@@ -138,9 +179,24 @@ export default function TicketDetailPage() {
     setSending(true)
     try {
       const adjuntos = await Promise.all(commentFiles.map(f => readFileAsBase64(f).then(data => ({ nombre: f.name, tipo: f.type, tamaño: f.size, data, url: '' }))))
-      const res = await fetch("/api/comments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ticketId: params.id, mensaje: comment, esInterno: isInternal, adjuntos }) })
-      if (res.ok) { setComment(""); setCommentFiles([]); const updated = await fetch(`/api/tickets/${params.id}`).then(r => r.json()); setTicket(updated) }
-    } catch { alert("Error al enviar comentario") } finally { setSending(false) }
+      const res = await fetch("/api/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticketId: params.id, mensaje: comment, esInterno: isInternal && esAgente, adjuntos })
+      })
+      if (res.ok) {
+        setComment("")
+        setCommentFiles([])
+        await refreshTicket()
+      } else {
+        const err = await res.json()
+        alert(err.error || "Error al enviar comentario")
+      }
+    } catch {
+      alert("Error de conexión al enviar comentario")
+    } finally {
+      setSending(false)
+    }
   }
 
   const insertPlantilla = (p: Plantilla) => { setComment(p.contenido); setShowPlantillas(false) }
@@ -189,7 +245,7 @@ export default function TicketDetailPage() {
   const acciones = ACCIONES[ticket.estado]?.filter(a => puedeAccion(a)) || []
 
   return (
-    <div className="space-y-6 max-w-6xl px-2 sm:px-4 lg:px-6 py-4 sm:py-6">
+    <div className="space-y-6 max-w-6xl mx-auto px-2 sm:px-4 lg:px-6 py-4 sm:py-6">
       {/* Breadcrumb sutil */}
       <nav className="flex items-center gap-2 text-sm text-muted-foreground">
         <Link href="/dashboard" className="hover:text-foreground transition-colors">Dashboard</Link>
@@ -267,11 +323,16 @@ export default function TicketDetailPage() {
                 )}
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
               <div className="max-h-[320px] overflow-auto text-sm whitespace-pre-wrap leading-relaxed text-foreground/90 bg-muted/20 rounded-xl p-4 border border-border/30">{ticket.descripcion}</div>
               {ticket.adjuntos.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {ticket.adjuntos.map(a => <AdjuntoBadge key={a.id} a={a} />)}
+                <div className="pt-3 border-t border-border/40 space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                    <Paperclip className="h-3.5 w-3.5" /> Archivos adjuntos ({ticket.adjuntos.length})
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    {ticket.adjuntos.map(a => <AdjuntoCard key={a.id} a={a} onPreview={setPreviewImage} />)}
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -287,15 +348,17 @@ export default function TicketDetailPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Formulario de comentario */}
-              {esAgente && (
+              {(esAgente || esSolicitante) && (
                 <form onSubmit={addComment} className="space-y-3 bg-muted/30 rounded-xl p-4 border border-border/50">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
-                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-                        <input type="checkbox" checked={isInternal} onChange={e => setIsInternal(e.target.checked)} className="rounded" />
-                        <Tag className="h-3 w-3" /> Interno
-                      </label>
-                      {plantillas.length > 0 && (
+                      {esAgente && (
+                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                          <input type="checkbox" checked={isInternal} onChange={e => setIsInternal(e.target.checked)} className="rounded" />
+                          <Tag className="h-3 w-3" /> Interno
+                        </label>
+                      )}
+                      {esAgente && plantillas.length > 0 && (
                         <div className="relative">
                           <button type="button" onClick={() => setShowPlantillas(!showPlantillas)}
                             className="flex items-center gap-1 text-xs text-primary hover:underline px-2 py-1 rounded-lg hover:bg-muted/50"
@@ -374,7 +437,9 @@ export default function TicketDetailPage() {
                       </div>
                       <p className="text-sm whitespace-pre-wrap leading-relaxed">{c.mensaje}</p>
                       {c.adjuntos?.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-2">{c.adjuntos.map(a => <AdjuntoBadge key={a.id} a={a} />)}</div>
+                        <div className="flex flex-wrap gap-2.5 mt-3 pt-2 border-t border-border/30">
+                          {c.adjuntos.map(a => <AdjuntoCard key={a.id} a={a} onPreview={setPreviewImage} />)}
+                        </div>
                       )}
                     </div>
                   ))}
@@ -631,30 +696,88 @@ export default function TicketDetailPage() {
           </div>
         </div>
       </Modal>
+      {/* Modal Previsualización de Imagen */}
+      <Modal open={!!previewImage} onClose={() => setPreviewImage(null)} title={previewImage?.nombre || "Vista previa de imagen"}>
+        <div className="flex flex-col items-center justify-center p-2">
+          {previewImage && (
+            <img
+              src={previewImage.data ? `data:${previewImage.tipo};base64,${previewImage.data}` : previewImage.url}
+              alt={previewImage.nombre}
+              className="max-h-[70vh] max-w-full rounded-xl object-contain shadow-lg"
+            />
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }
 
 /* Componentes auxiliares */
 
-function AdjuntoBadge({ a }: { a: AdjuntoData }) {
-  const download = () => {
-    if (a.data) { const l = document.createElement('a'); l.href = `data:${a.tipo};base64,${a.data}`; l.download = a.nombre; l.click(); l.remove() }
-    else if (a.url) window.open(a.url, '_blank')
-  }
+function AdjuntoCard({ a, onPreview }: { a: AdjuntoData; onPreview?: (a: AdjuntoData) => void }) {
   const isImg = a.tipo?.startsWith('image/')
+  const download = () => {
+    if (a.data) {
+      const l = document.createElement('a')
+      l.href = `data:${a.tipo};base64,${a.data}`
+      l.download = a.nombre
+      l.click()
+      l.remove()
+    } else if (a.url) {
+      window.open(a.url, '_blank')
+    }
+  }
+
+  if (isImg) {
+    const imgSrc = a.data ? `data:${a.tipo};base64,${a.data}` : a.url
+    return (
+      <div className="group relative rounded-xl border border-border/60 bg-card overflow-hidden shadow-xs hover:shadow-md transition-all w-36 sm:w-44 flex flex-col shrink-0">
+        <div className="relative h-28 w-full bg-muted/40 flex items-center justify-center overflow-hidden">
+          <img src={imgSrc} alt={a.nombre} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300" />
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => onPreview ? onPreview(a) : download()}
+              className="p-1.5 rounded-lg bg-white/90 text-slate-800 hover:bg-white transition-colors shadow-sm cursor-pointer"
+              title="Previsualizar"
+            >
+              <Eye className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={download}
+              className="p-1.5 rounded-lg bg-white/90 text-slate-800 hover:bg-white transition-colors shadow-sm cursor-pointer"
+              title="Descargar"
+            >
+              <Download className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <div className="p-2 flex flex-col justify-between flex-1 bg-card">
+          <p className="text-xs font-medium truncate text-foreground" title={a.nombre}>{a.nombre}</p>
+          {a.tamaño && <p className="text-[10px] text-muted-foreground mt-0.5">{(a.tamaño / 1024).toFixed(0)} KB</p>}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <button type="button" onClick={download}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1.5 text-xs hover:bg-muted/40 transition-colors group"
-    >
-      {isImg ? (
-        <img src={`data:${a.tipo};base64,${a.data}`} alt={a.nombre} className="h-5 w-5 rounded object-cover" />
-      ) : (
-        <Paperclip className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground" />
-      )}
-      <span className="max-w-[140px] truncate">{a.nombre}</span>
-      {a.tamaño && <span className="text-[10px] text-muted-foreground">({(a.tamaño / 1024).toFixed(0)} KB)</span>}
-    </button>
+    <div className="group rounded-xl border border-border/60 bg-card p-3 shadow-xs hover:shadow-md transition-all w-44 sm:w-52 flex items-center gap-3 shrink-0">
+      <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+        <FileText className="h-5 w-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium truncate text-foreground" title={a.nombre}>{a.nombre}</p>
+        {a.tamaño && <p className="text-[10px] text-muted-foreground mt-0.5">{(a.tamaño / 1024).toFixed(0)} KB</p>}
+        <button
+          type="button"
+          onClick={download}
+          className="text-[11px] font-medium text-primary hover:underline flex items-center gap-1 mt-1 cursor-pointer"
+        >
+          <Download className="h-3 w-3" /> Descargar
+        </button>
+      </div>
+    </div>
   )
 }
 

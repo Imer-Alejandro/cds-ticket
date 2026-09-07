@@ -24,7 +24,7 @@ interface Notificacion {
 }
 
 const ESTADO_LABEL: Record<string, string> = {
-  NUEVO: "Nuevo", ASIGNADO: "Asignado", EN_PROGRESO: "En Progreso", RESUELTO: "Resuelto", CERRADO: "Cerrado",
+  NUEVO: "Nuevo", ASIGNADO: "Asignado", EN_PROGRESO: "En Progreso", PENDIENTE: "Pendiente", RESUELTO: "Resuelto", CERRADO: "Cerrado", ELIMINADO: "Eliminado",
 }
 
 function useDebounce(value: string, delay: number) {
@@ -134,8 +134,11 @@ export function Header() {
                       }`}>{r.nivelPrioridad}</span>
                       <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
                         r.estado === "NUEVO" ? "bg-blue-100 text-blue-700" :
+                        r.estado === "ASIGNADO" ? "bg-indigo-100 text-indigo-700" :
                         r.estado === "EN_PROGRESO" ? "bg-amber-100 text-amber-700" :
+                        r.estado === "PENDIENTE" ? "bg-purple-100 text-purple-700" :
                         r.estado === "RESUELTO" ? "bg-emerald-100 text-emerald-700" :
+                        r.estado === "ELIMINADO" ? "bg-rose-100 text-rose-700" :
                         "bg-slate-100 text-slate-700"
                       }`}>{ESTADO_LABEL[r.estado] || r.estado}</span>
                     </div>

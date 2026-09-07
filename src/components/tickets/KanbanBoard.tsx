@@ -18,8 +18,10 @@ const COLUMNAS: { estado: string; label: string; dot: string; bg: string }[] = [
   { estado: "NUEVO", label: "Nuevos", dot: "bg-purple-500", bg: "border-purple-200 dark:border-purple-900/40" },
   { estado: "ASIGNADO", label: "Asignados", dot: "bg-indigo-500", bg: "border-indigo-200 dark:border-indigo-900/40" },
   { estado: "EN_PROGRESO", label: "En Progreso", dot: "bg-blue-500", bg: "border-blue-200 dark:border-blue-900/40" },
+  { estado: "PENDIENTE", label: "Pendientes", dot: "bg-amber-500", bg: "border-amber-200 dark:border-amber-900/40" },
   { estado: "RESUELTO", label: "Resueltos", dot: "bg-emerald-500", bg: "border-emerald-200 dark:border-emerald-900/40" },
   { estado: "CERRADO", label: "Cerrados", dot: "bg-slate-400", bg: "border-slate-200 dark:border-slate-700" },
+  { estado: "ELIMINADO", label: "Eliminados", dot: "bg-rose-500", bg: "border-rose-200 dark:border-rose-900/40" },
 ]
 
 const PRIO_DOT: Record<string, string> = {

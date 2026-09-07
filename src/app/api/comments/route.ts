@@ -41,6 +41,13 @@ export async function POST(request: Request) {
 
     const rolNombre = (session as { rolNombre?: string }).rolNombre
     const esMiembroEquipo = rolNombre === 'Agente' || rolNombre === 'Administrador'
+    const esSolicitante = ticket.solicitanteId === session.id
+
+    if (!esMiembroEquipo && !esSolicitante) {
+      return NextResponse.json({ error: 'No tienes permiso para comentar en este ticket' }, { status: 403 })
+    }
+
+    const esInterno = esMiembroEquipo ? Boolean(data.esInterno) : false
     const nombreAutor = `${(session as { nombre?: string }).nombre || ''}`.trim() || (session.id as string)
 
     const comment = await prisma.comentario.create({
@@ -48,7 +55,7 @@ export async function POST(request: Request) {
         ticketId: data.ticketId,
         usuarioId: session.id as string,
         mensaje: data.mensaje,
-        esInterno: data.esInterno || false,
+        esInterno,
       },
       include: {
         usuario: { select: { id: true, nombre: true, apellido: true } },

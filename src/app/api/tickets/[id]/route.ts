@@ -59,6 +59,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       logs.push({ accion: 'CAMBIO_ESTADO', valorAnterior: ticket.estado, valorNuevo: data.estado })
       if (data.estado === 'RESUELTO') updateData.fechaResolucion = new Date()
       if (data.estado === 'CERRADO') updateData.fechaCierre = new Date()
+      if (data.estado === 'PENDIENTE') updateData.fechaPendiente = new Date()
     }
     if (data.agenteId && data.agenteId !== ticket.agenteId) {
       if (!esMiembroEquipo) {

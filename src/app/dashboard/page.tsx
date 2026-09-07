@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,6 +21,7 @@ import {
   Globe,
   Award,
   FileDown,
+  Trash2,
 } from "lucide-react"
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -33,8 +35,10 @@ const ESTADOS_COLORS: Record<string, string> = {
   NUEVO: "#3b82f6",
   ASIGNADO: "#8b5cf6",
   EN_PROGRESO: "#f59e0b",
+  PENDIENTE: "#a855f7",
   RESUELTO: "#10b981",
   CERRADO: "#6b7280",
+  ELIMINADO: "#f43f5e",
 }
 
 const PRIORIDAD_COLORS: Record<string, string> = {
@@ -55,8 +59,10 @@ const DIAS_OPCIONES = [
 interface DashboardData {
   total: number
   abiertos: number
+  pendientes?: number
   resueltos: number
   cerrados: number
+  eliminados?: number
   enRango: number
   ticketsPorEstado: { nombre: string; cantidad: number }[]
   ticketsPorPrioridad: { nombre: string; cantidad: number }[]
@@ -110,6 +116,7 @@ function MetricCard({
   icon: Icon,
   color,
   trend,
+  href,
 }: {
   title: string
   value: string
@@ -117,12 +124,13 @@ function MetricCard({
   icon: React.ElementType
   color: string
   trend?: { value: string; up: boolean }
+  href?: string
 }) {
-  return (
-    <Card className="rounded-2xl border-border/50 shadow-sm hover:shadow-md transition-all">
-      <CardContent className="p-5">
+  const cardContent = (
+    <Card className="rounded-2xl border-border/50 shadow-sm hover:shadow-md transition-all h-full cursor-pointer group hover:border-primary/40">
+      <CardContent className="p-5 flex flex-col justify-between h-full">
         <div className="flex items-start justify-between">
-          <div className={`p-2.5 rounded-xl ${color}`}>
+          <div className={`p-2.5 rounded-xl ${color} group-hover:scale-105 transition-transform`}>
             <Icon className="h-5 w-5 text-white" />
           </div>
           {trend && (
@@ -136,13 +144,18 @@ function MetricCard({
           )}
         </div>
         <div className="mt-4">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</p>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider group-hover:text-primary transition-colors">{title}</p>
           <p className="text-2xl font-bold mt-1 text-foreground">{value}</p>
           {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
         </div>
       </CardContent>
     </Card>
   )
+
+  if (href) {
+    return <Link href={href} className="block h-full">{cardContent}</Link>
+  }
+  return cardContent
 }
 
 function ChartCard({
@@ -458,6 +471,7 @@ export default function DashboardPage() {
           subtitle={`${data.enRango} en período`}
           icon={TicketIcon}
           color="bg-blue-500"
+          href="/tickets"
         />
         <MetricCard
           title="Abiertos"
@@ -466,6 +480,15 @@ export default function DashboardPage() {
           icon={AlertCircle}
           color="bg-amber-500"
           trend={{ value: `${Math.round(totalAbiertos / Math.max(data.total, 1) * 100)}%`, up: totalAbiertos > 0 }}
+          href="/tickets?estado=ABIERTOS"
+        />
+        <MetricCard
+          title="Pendientes"
+          value={(data.pendientes ?? 0).toLocaleString()}
+          subtitle="En espera"
+          icon={Clock}
+          color="bg-purple-500"
+          href="/tickets?estado=PENDIENTE"
         />
         <MetricCard
           title="Resueltos"
@@ -473,27 +496,22 @@ export default function DashboardPage() {
           icon={CheckCircle2}
           color="bg-emerald-500"
           trend={{ value: `${Math.round(data.resueltos / Math.max(data.total, 1) * 100)}%`, up: true }}
+          href="/tickets?estado=RESUELTO"
         />
         <MetricCard
           title="Cerrados"
           value={data.cerrados.toLocaleString()}
           icon={CheckCircle2}
           color="bg-slate-500"
+          href="/tickets?estado=CERRADO"
         />
         <MetricCard
-          title="SLA Cumplido"
-          value={`${data.sla.porcentaje}%`}
-          subtitle={`${data.sla.cumplidos}/${data.sla.total}`}
-          icon={Clock}
-          color="bg-purple-500"
-          trend={{ value: `${data.sla.porcentaje}%`, up: data.sla.porcentaje >= 90 }}
-        />
-        <MetricCard
-          title="Tiempo Promedio"
-          value={data.tiempoResolucionPromedio ? `${data.tiempoResolucionPromedio}h` : "—"}
-          subtitle="Resolución"
-          icon={TrendingUp}
+          title="Eliminados"
+          value={(data.eliminados ?? 0).toLocaleString()}
+          subtitle="Archivados"
+          icon={Trash2}
           color="bg-rose-500"
+          href="/tickets?estado=ELIMINADO"
         />
       </div>
 

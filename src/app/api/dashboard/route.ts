@@ -39,16 +39,20 @@ export async function GET(request: Request) {
       prisma.ticket.groupBy({ by: ["origen"], _count: true, where: { fechaCreacion: { gte: desde } } }),
     ])
 
-    const total = await prisma.ticket.count()
-    const abiertos = await prisma.ticket.count({ where: { estado: { notIn: ["CERRADO", "RESUELTO"] } } })
+    const total = await prisma.ticket.count({ where: { estado: { not: "ELIMINADO" } } })
+    const abiertos = await prisma.ticket.count({ where: { estado: { in: ["NUEVO", "ASIGNADO", "EN_PROGRESO", "PENDIENTE"] } } })
+    const pendientes = await prisma.ticket.count({ where: { estado: "PENDIENTE" } })
     const resueltos = await prisma.ticket.count({ where: { estado: "RESUELTO" } })
     const cerrados = await prisma.ticket.count({ where: { estado: "CERRADO" } })
+    const eliminados = await prisma.ticket.count({ where: { estado: "ELIMINADO" } })
 
     return NextResponse.json({
       total,
       abiertos,
+      pendientes,
       resueltos,
       cerrados,
+      eliminados,
       enRango: totalTickets,
       ticketsPorEstado: ticketsPorEstado.map((e) => ({ nombre: e.estado, cantidad: e._count })),
       ticketsPorPrioridad: ticketsPorPrioridad.map((p) => ({ nombre: p.nivelPrioridad, cantidad: p._count })),
