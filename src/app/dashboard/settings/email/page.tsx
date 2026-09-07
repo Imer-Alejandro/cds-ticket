@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ArrowLeft, Mail, Loader2, ChevronRight, CheckCircle2, AlertCircle, Eye, EyeOff } from "lucide-react"
 import Link from "next/link"
+import { apiFetch } from "@/lib/api"
 
 export default function EmailSettingsPage() {
   const router = useRouter()
@@ -25,7 +26,7 @@ export default function EmailSettingsPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/settings/email').then(r => r.json()),
+      apiFetch('/api/settings/email').then(r => r.json()),
       fetch('/api/categories').then(r => r.json()),
     ]).then(([cfg, cats]) => {
       setForm(prev => ({ ...prev, ...cfg }))
@@ -36,7 +37,7 @@ export default function EmailSettingsPage() {
   const handleSave = async () => {
     setSaving(true); setTestResult(null)
     try {
-      const res = await fetch('/api/settings/email', {
+      const res = await apiFetch('/api/settings/email', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
       })
       if (res.ok) setTestResult('ok')

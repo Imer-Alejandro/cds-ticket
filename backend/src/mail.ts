@@ -4,6 +4,9 @@ import { getPrisma } from '../lib/prisma'
 import { loadEmailConfig, type EmailConfig } from '../lib/email-config'
 import { notifyUsers } from './socket'
 import { resolveEmailCategoriaId, resolveEmailRoleId } from '../../src/lib/mail/helpers'
+import { handleIncomingEmail } from '../../src/lib/mail/ingest'
+import { autoAssignAgent } from '../../src/lib/assignment'
+import { makePrismaAssignmentRepo } from '../../src/lib/assignment-prisma'
 
 let intervalHandle: ReturnType<typeof setInterval> | null = null
 
@@ -28,6 +31,8 @@ export async function checkMail(cfg?: EmailConfig) {
       if (!result) return
       const msgs = result as number[]
 
+      const categoriaId = (await resolveEmailCategoriaId({ defaultCategoriaId: config.defaultCategoriaId || '' } as any, prisma)) || undefined
+
       for (const seq of msgs) {
         try {
           const raw = await client.download(String(seq))
@@ -37,94 +42,32 @@ export async function checkMail(cfg?: EmailConfig) {
           }
           const parsed = await simpleParser(Buffer.concat(chunks))
 
-          const fromEmail = parsed.from?.value?.[0]?.address
-          if (!fromEmail) continue
-
-          let usuario = await prisma.usuario.findUnique({ where: { correo: fromEmail } })
-          if (!usuario) {
-            const fromName = parsed.from?.value?.[0]?.name || fromEmail.split('@')[0]
-            const defaultRoleId = await resolveEmailRoleId(prisma)
-            if (!defaultRoleId) {
-              console.error('[Mail] No default role found for incoming email')
-              continue
-            }
-            usuario = await prisma.usuario.create({
-              data: {
-                nombre: fromName,
-                apellido: '',
-                correo: fromEmail,
-                userName: fromEmail.split('@')[0] + '_' + Date.now(),
-                password: null,
-                rolId: defaultRoleId,
-                departamentoId: null,
-              },
-            })
-          }
-
-          const subject = parsed.subject || 'Sin asunto'
-          const textBody = parsed.text || (parsed.html ? parsed.html.replace(/<[^>]*>/g, '') : '')
-
-          const lastTicket = await prisma.ticket.findFirst({ orderBy: { codigo: 'desc' } })
-          const nextNum = lastTicket ? parseInt(lastTicket.codigo.replace('TK-', ''), 10) + 1 : 1
-          const codigo = `TK-${String(nextNum).padStart(5, '0')}`
-          const catId = await resolveEmailCategoriaId({ defaultCategoriaId: config.defaultCategoriaId || '' } as any, prisma)
-
-          if (!catId) {
-            console.error('[Mail] No default category found for incoming email')
-            continue
-          }
-
-          const ticket = await prisma.ticket.create({
-            data: {
-              codigo,
-              asunto: subject.substring(0, 200),
-              descripcion: textBody.substring(0, 2000),
-              estado: 'NUEVO',
-              nivelPrioridad: 'MEDIA',
-              solicitanteId: usuario.id,
-              categoriaId: catId,
-              origen: 'CORREO',
+          const resultIngest = await handleIncomingEmail(
+            {
+              repo: prisma as any,
+              defaultCategoriaId: categoriaId,
+              resolveRoleId: () => resolveEmailRoleId(prisma),
+              autoAssign: async ({ colaId }) => autoAssignAgent(makePrismaAssignmentRepo(prisma), colaId),
+              log: console.log,
             },
-          })
+            parsed as any
+          )
 
-          await prisma.logTicket.create({
-            data: {
-              ticketId: ticket.id,
-              usuarioId: usuario.id,
-              accion: 'CREACION',
-              valorNuevo: 'Ticket creado desde correo',
-            },
-          })
-
-          if (parsed.attachments?.length) {
-            for (const att of parsed.attachments) {
-              const buf = Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content)
-              await prisma.adjunto.create({
-                data: {
-                  ticketId: ticket.id,
-                  nombre: att.filename || 'sin_nombre',
-                  tipo: att.contentType || 'application/octet-stream',
-                  url: '',
-                  data: buf.toString('base64'),
-                  tamaño: buf.length,
-                },
-              })
-            }
-          }
+          if (!resultIngest) continue
 
           await client.messageFlagsAdd(seq, ['\\Seen'])
 
-          console.log(`[Mail] Ticket ${codigo} creado desde correo de ${fromEmail}`)
+          console.log(`[Mail] ${resultIngest.kind === 'reply' ? 'Respuesta' : 'Ticket'} ${resultIngest.codigo} procesado`)
 
-          // Notificar a los agentes
+          // Notificar a los agentes por socket en tiempo real
           const agentes = await prisma.usuario.findMany({
             where: { rol: { nombre: { in: ['Agente', 'Administrador'] } } },
             select: { id: true },
           })
           notifyUsers(
             agentes.map(a => a.id),
-            'nuevoTicket',
-            { ticket: { id: ticket.id, codigo, asunto: ticket.asunto } }
+            resultIngest.kind === 'reply' ? 'ticketUpdated' : 'nuevoTicket',
+            { ticket: { id: resultIngest.ticketId, codigo: resultIngest.codigo } }
           )
         } catch (err) {
           console.error('[Mail] Error procesando correo:', err)

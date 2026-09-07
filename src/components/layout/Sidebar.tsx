@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/store/useAuthStore"
 import { Button } from "../ui/button"
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 
 const mainNav = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -46,12 +47,18 @@ const settingsItems = [
 
 export function Sidebar() {
   const pathname = usePathname()
+  const router = useRouter()
   const { user, logout } = useAuthStore()
   const [settingsOpen, setSettingsOpen] = useState(pathname.startsWith("/dashboard/settings"))
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     logout()
-    window.location.href = "/login"
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    } catch {
+      // ignore
+    }
+    router.replace('/login')
   }
 
   return (

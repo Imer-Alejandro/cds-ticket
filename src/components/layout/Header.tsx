@@ -7,6 +7,7 @@ import { Button } from "../ui/button"
 import { useAuthStore } from "@/store/useAuthStore"
 import { useSocket, onNotificacion } from "@/hooks/useSocket"
 import { playNotificationSound } from "@/lib/sound"
+import { formatDateTime } from "@/lib/utils"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { apiFetch } from "@/lib/api"
@@ -19,7 +20,7 @@ interface SearchResult {
 
 interface Notificacion {
   id: string; tipo: string; mensaje: string; leido: boolean; fecha: string
-  ticket: { codigo: string; asunto: string }
+  ticket: { id: string; codigo: string; asunto: string }
 }
 
 const ESTADO_LABEL: Record<string, string> = {
@@ -104,8 +105,6 @@ export function Header() {
   const notifIcon: Record<string, string> = {
     NUEVO_TICKET: "🎫", CAMBIO_ESTADO: "🔄", ASIGNACION: "👤", NUEVO_COMENTARIO: "💬",
   }
-
-  const ticketIdFromCodigo = (codigo: string) => codigo.replace('TK-', '')
 
   return (
     <header className="flex h-[72px] items-center justify-between border-b bg-card/80 backdrop-blur-sm px-8 sticky top-0 z-10 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
@@ -200,7 +199,7 @@ export function Header() {
                   <div className="p-6 text-center text-sm text-muted-foreground">Sin notificaciones</div>
                 ) : (
                   notifs.slice(0, 20).map(n => {
-                    const ticketId = n.ticket?.codigo ? ticketIdFromCodigo(n.ticket.codigo) : ''
+                    const ticketId = n.ticket?.id || n.ticket?.codigo?.replace('TK-', '') || ''
                     return (
                       <button key={n.id} onClick={() => { markRead(n.id); router.push(`/tickets/${ticketId}`); setNotifOpen(false) }}
                         className={`w-full px-4 py-3 text-left flex items-start gap-3 hover:bg-accent transition-colors border-b border-border/50 last:border-0 ${n.leido ? "" : "bg-accent/30"}`}
@@ -208,7 +207,7 @@ export function Header() {
                         <span className="text-lg shrink-0 mt-0.5">{notifIcon[n.tipo] || "🔔"}</span>
                         <div className="flex-1 min-w-0">
                           <p className={`text-sm ${n.leido ? "text-muted-foreground" : "text-foreground font-medium"}`}>{n.mensaje}</p>
-                          <p className="text-xs text-muted-foreground/60 mt-0.5">{new Date(n.fecha).toLocaleString()}</p>
+                          <p className="text-xs text-muted-foreground/60 mt-0.5">{formatDateTime(n.fecha)}</p>
                         </div>
                       </button>
                     )

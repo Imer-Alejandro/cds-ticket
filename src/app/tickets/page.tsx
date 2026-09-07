@@ -1,41 +1,49 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
-import { Plus, Search, ArrowUpDown, FileText, Clock, Loader2, Ticket, FilterX } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Plus, Search, ArrowUpDown, Loader2, FilterX, ChevronLeft, ChevronRight, Inbox, UserCheck, Ticket } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useAuthStore } from "@/store/useAuthStore"
+import { apiFetch } from "@/lib/api"
+import { useSocket, onNotificacion } from "@/hooks/useSocket"
+import { playNotificationSound } from "@/lib/sound"
+import { EstadoBadge, PrioridadBadge } from "@/components/tickets/badges"
+import { SlaBar } from "@/components/tickets/SlaBar"
+import { KanbanBoard, KanbanToggle, type KanbanTicket } from "@/components/tickets/KanbanBoard"
+import { EmptyState } from "@/components/ui/empty-state"
 
 interface Ticket {
   id: string; codigo: string; asunto: string; estado: string; nivelPrioridad: string
   solicitante: { nombre: string; apellido: string }
   agente: { nombre: string; apellido: string } | null
   categoria: { nombre: string }
+  sla: { id: string; minutosRespuesta: number; minutosResolucion: number } | null
   fechaCreacion: string
+}
+
+interface TicketListResponse {
+  tickets: Ticket[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
 }
 
 const ESTADOS = ["", "NUEVO", "ASIGNADO", "EN_PROGRESO", "RESUELTO", "CERRADO"]
 const PRIORIDADES = ["", "CRITICA", "ALTA", "MEDIA", "BAJA"]
 
-const ESTADO_BADGE: Record<string, string> = {
-  NUEVO: "bg-blue-50 text-blue-700 border-blue-200",
-  ASIGNADO: "bg-amber-50 text-amber-700 border-amber-200",
-  EN_PROGRESO: "bg-orange-50 text-orange-700 border-orange-200",
-  RESUELTO: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  CERRADO: "bg-slate-100 text-slate-600 border-slate-200",
-}
-const PRIORIDAD_BADGE: Record<string, string> = {
-  CRITICA: "bg-red-50 text-red-700 border-red-200",
-  ALTA: "bg-orange-50 text-orange-700 border-orange-200",
-  MEDIA: "bg-blue-50 text-blue-700 border-blue-200",
-  BAJA: "bg-green-50 text-green-700 border-green-200",
-}
-
 const ESTADO_LABEL: Record<string, string> = {
   NUEVO: "Nuevo", ASIGNADO: "Asignado", EN_PROGRESO: "En Progreso", RESUELTO: "Resuelto", CERRADO: "Cerrado",
 }
 
+type VistaFilter = "todos" | "mios" | "sinAsignar"
+
 export default function TicketsPage() {
+  const router = useRouter()
+  const { user } = useAuthStore()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
@@ -43,6 +51,44 @@ export default function TicketsPage() {
   const [prioridadFilter, setPrioridadFilter] = useState("")
   const [sortField, setSortField] = useState("fechaCreacion")
   const [sortDir, setSortDir] = useState("desc")
+  const [vista, setVista] = useState<VistaFilter>("todos")
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [stats, setStats] = useState({ misActivos: 0, noAsignados: 0 })
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
+  const [fetchTick, setFetchTick] = useState(0)
+  const [view, setView] = useState<"table" | "kanban">("table")
+
+  const pageSize = view === "kanban" ? 100 : 20
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/tickets/stats")
+      if (res.ok) setStats(await res.json())
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => { fetchStats() }, [fetchStats])
+
+  useSocket()
+
+  const refetch = useCallback(() => {
+    setFetchTick(t => t + 1)
+  }, [])
+
+  useEffect(() => {
+    const unsubNuevo = onNotificacion('nuevoTicket', (data: any) => {
+      if (data?.ticket?.id) {
+        setHighlightedId(data.ticket.id)
+        playNotificationSound()
+        setTimeout(() => setHighlightedId(null), 2500)
+        refetch()
+      }
+    })
+    const unsubUpdate = onNotificacion('ticketUpdated', () => { refetch() })
+    return () => { unsubNuevo(); unsubUpdate() }
+  }, [refetch])
 
   useEffect(() => {
     setLoading(true)
@@ -50,15 +96,48 @@ export default function TicketsPage() {
     if (search) params.set("search", search)
     if (estadoFilter) params.set("estado", estadoFilter)
     if (prioridadFilter) params.set("prioridad", prioridadFilter)
+    if (vista === "mios" && user?.id) params.set("asignadosA", user.id)
+    if (vista === "sinAsignar") params.set("sinAsignar", "true")
     params.set("sortField", sortField)
     params.set("sortDir", sortDir)
-    fetch(`/api/tickets?${params}`)
+    params.set("page", String(page))
+    params.set("pageSize", String(pageSize))
+    apiFetch(`/api/tickets?${params}`)
       .then(r => r.ok && r.json())
-      .then(data => setTickets(data || []))
+      .then((data: TicketListResponse | null) => {
+        setTickets(data?.tickets || [])
+        setTotal(data?.total || 0)
+        setTotalPages(data?.totalPages || 1)
+      })
       .finally(() => setLoading(false))
-  }, [search, estadoFilter, prioridadFilter, sortField, sortDir])
+  }, [search, estadoFilter, prioridadFilter, sortField, sortDir, vista, user?.id, page, fetchTick, view])
 
-  const hasFilters = search || estadoFilter || prioridadFilter
+  const hasFilters = search || estadoFilter || prioridadFilter || vista !== "todos"
+
+  const handleSort = (f: string) => {
+    if (f === sortField) {
+      setSortDir(d => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortField(f); setSortDir("asc")
+    }
+  }
+
+  const clearFilters = () => {
+    setSearch(""); setEstadoFilter(""); setPrioridadFilter(""); setVista("todos"); setPage(1)
+  }
+
+  const vistaButton = (v: VistaFilter, label: string, count: number, icon?: React.ReactNode) => (
+    <button
+      onClick={() => { setVista(v); setPage(1) }}
+      className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+        vista === v ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/40 text-muted-foreground hover:bg-muted/70"
+      }`}
+    >
+      {icon}
+      {label}
+      <span className={`text-[10px] font-bold rounded-full px-1.5 py-0.5 ${vista === v ? "bg-white/20" : "bg-muted"}`}>{count}</span>
+    </button>
+  )
 
   return (
     <div className="space-y-6 px-2 sm:px-4 lg:px-6 py-4 sm:py-6">
@@ -87,21 +166,31 @@ export default function TicketsPage() {
         </Link>
       </div>
 
+      {/* Vista rápida: Mis tickets / Sin asignar */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {vistaButton("todos", "Todos", total)}
+          {vistaButton("mios", "Mis tickets", stats.misActivos, <UserCheck className="h-4 w-4" />)}
+          {vistaButton("sinAsignar", "Sin asignar", stats.noAsignados, <Inbox className="h-4 w-4" />)}
+        </div>
+        <KanbanToggle view={view} onChange={v => { setView(v); setPage(1) }} />
+      </div>
+
       {/* Filters */}
       <div className="bg-card rounded-2xl border border-border/50 shadow-sm p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[220px]">
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Buscar por asunto o código..."
+              placeholder="Buscar por asunto, código, correo o agente..."
               className="pl-10 rounded-xl h-10 bg-muted/30 border-0 focus-visible:bg-background focus-visible:border focus-visible:border-input"
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => { setSearch(e.target.value); setPage(1) }}
             />
           </div>
           <select
             value={estadoFilter}
-            onChange={e => setEstadoFilter(e.target.value)}
+            onChange={e => { setEstadoFilter(e.target.value); setPage(1) }}
             className="h-10 rounded-xl border border-border bg-transparent px-3 text-sm min-w-[130px]"
           >
             <option value="">Todos los estados</option>
@@ -111,7 +200,7 @@ export default function TicketsPage() {
           </select>
           <select
             value={prioridadFilter}
-            onChange={e => setPrioridadFilter(e.target.value)}
+            onChange={e => { setPrioridadFilter(e.target.value); setPage(1) }}
             className="h-10 rounded-xl border border-border bg-transparent px-3 text-sm min-w-[130px]"
           >
             <option value="">Todas las prioridades</option>
@@ -122,7 +211,7 @@ export default function TicketsPage() {
               variant="ghost"
               size="sm"
               className="text-muted-foreground rounded-xl gap-1.5"
-              onClick={() => { setSearch(""); setEstadoFilter(""); setPrioridadFilter("") }}
+              onClick={clearFilters}
             >
               <FilterX className="h-4 w-4" /> Limpiar
             </Button>
@@ -130,19 +219,31 @@ export default function TicketsPage() {
         </div>
       </div>
 
-      {/* Table */}
+      {view === "kanban" ? (
+        <div className="bg-card rounded-2xl border border-border/50 shadow-sm p-4">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-20 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Cargando tickets...</div>
+          ) : tickets.length === 0 ? (
+            <EmptyState title="No hay tickets" subtitle={vista === "mios" ? "Aún no tienes tickets asignados" : vista === "sinAsignar" ? "No hay tickets sin asignar" : "Crea tu primer ticket para comenzar"}
+              action={<Link href="/tickets/new"><Button variant="outline" size="sm" className="rounded-xl">Crear primer ticket</Button></Link>} />
+          ) : (
+            <KanbanBoard tickets={tickets as unknown as KanbanTicket[]} />
+          )}
+        </div>
+      ) : (
+      /* Table */
       <div className="bg-card rounded-2xl border border-border/50 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border/50 bg-muted/30">
-                <Th sortable field="codigo" current={sortField} dir={sortDir} onClick={f => { setSortField(f); setSortDir(d => sortField === f && d === "asc" ? "desc" : "asc") }}>Código</Th>
-                <Th sortable field="asunto" current={sortField} dir={sortDir} onClick={f => { setSortField(f); setSortDir(d => sortField === f && d === "asc" ? "desc" : "asc") }}>Asunto</Th>
+                <Th sortable field="codigo" current={sortField} dir={sortDir} onClick={f => handleSort(f)}>Código</Th>
+                <Th sortable field="asunto" current={sortField} dir={sortDir} onClick={f => handleSort(f)}>Asunto</Th>
                 <Th>Solicitante</Th>
                 <Th className="text-center">Estado</Th>
                 <Th className="text-center">Prioridad</Th>
                 <Th>Asignado</Th>
-                <Th className="text-right">Creado</Th>
+                <Th>Resolución SLA</Th>
               </tr>
             </thead>
             <tbody>
@@ -151,24 +252,17 @@ export default function TicketsPage() {
                   <div className="flex items-center justify-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Cargando tickets...</div>
                 </td></tr>
               ) : tickets.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-20">
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="h-14 w-14 rounded-2xl bg-muted/50 flex items-center justify-center">
-                      <FileText className="h-7 w-7 text-muted-foreground/50" />
-                    </div>
-                    <p className="text-sm font-medium text-muted-foreground">No hay tickets</p>
-                    <p className="text-xs text-muted-foreground/60">Crea tu primer ticket para comenzar</p>
-                    <Link href="/tickets/new">
-                      <Button variant="outline" size="sm" className="rounded-xl mt-1">Crear primer ticket</Button>
-                    </Link>
-                  </div>
+                <tr><td colSpan={7}>
+                  <EmptyState title="No hay tickets"
+                    subtitle={vista === "mios" ? "Aún no tienes tickets asignados" : vista === "sinAsignar" ? "No hay tickets sin asignar" : "Crea tu primer ticket para comenzar"}
+                    action={<Link href="/tickets/new"><Button variant="outline" size="sm" className="rounded-xl mt-1">Crear primer ticket</Button></Link>} />
                 </td></tr>
               ) : (
                 tickets.map(t => (
                   <tr
                     key={t.id}
-                    className="border-b border-border/20 hover:bg-muted/20 transition-colors cursor-pointer group"
-                    onClick={() => window.location.href = `/tickets/${t.id}`}
+                    className={`border-b border-border/20 hover:bg-muted/20 transition-colors cursor-pointer group ${highlightedId === t.id ? 'bg-amber-100/70 dark:bg-amber-900/20 animate-pulse' : ''}`}
+                    onClick={() => router.push(`/tickets/${t.id}`)}
                   >
                     <td className="px-4 py-4">
                       <span className="font-mono text-xs font-semibold text-primary">{t.codigo}</span>
@@ -188,25 +282,21 @@ export default function TicketsPage() {
                       </div>
                     </td>
                     <td className="px-4 py-4 text-center">
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium border ${ESTADO_BADGE[t.estado] || ESTADO_BADGE.NUEVO}`}>
-                        {ESTADO_LABEL[t.estado] || t.estado}
-                      </span>
+                      <EstadoBadge estado={t.estado} />
                     </td>
                     <td className="px-4 py-4 text-center">
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold border ${PRIORIDAD_BADGE[t.nivelPrioridad] || PRIORIDAD_BADGE.MEDIA}`}>
-                        {t.nivelPrioridad}
-                      </span>
+                      <PrioridadBadge prioridad={t.nivelPrioridad} />
                     </td>
                     <td className="px-4 py-4">
                       <span className="text-sm text-muted-foreground">
                         {t.agente ? `${t.agente.nombre} ${t.agente.apellido}` : <span className="italic">Sin asignar</span>}
                       </span>
                     </td>
-                    <td className="px-4 py-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5 text-xs text-muted-foreground">
-                        <Clock className="h-3.5 w-3.5" />
-                        {new Date(t.fechaCreacion).toLocaleDateString()}
-                      </div>
+                    <td className="px-4 py-4">
+                      {t.sla
+                        ? (<SlaBar createdAt={t.fechaCreacion} minutesResponse={t.sla.minutosRespuesta} minutesResolution={t.sla.minutosResolucion} mode="resolution" />)
+                        : (<span className="text-xs text-muted-foreground">Sin SLA</span>)
+                      }
                     </td>
                   </tr>
                 ))
@@ -216,10 +306,29 @@ export default function TicketsPage() {
         </div>
         {!loading && tickets.length > 0 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-border/50 bg-muted/20">
-            <p className="text-xs text-muted-foreground">{tickets.length} ticket{tickets.length !== 1 ? "s" : ""}</p>
+            <p className="text-xs text-muted-foreground">
+              {total} ticket{total !== 1 ? "s" : ""} · Página {page} de {totalPages}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline" size="sm" className="rounded-lg h-8 px-2.5"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline" size="sm" className="rounded-lg h-8 px-2.5"
+                disabled={page >= totalPages || loading}
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

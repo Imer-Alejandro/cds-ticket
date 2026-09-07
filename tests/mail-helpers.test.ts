@@ -1,37 +1,35 @@
-import test from 'node:test'
-import assert from 'node:assert/strict'
+import { describe, it, expect } from 'vitest'
+import { resolveEmailCategoriaId } from '../src/lib/mail/helpers'
 
-process.env.DATABASE_URL = 'postgresql://user:pass@localhost:5432/test'
+describe('resolveEmailCategoriaId', () => {
+  it('devuelve la categoría configurada cuando es válida', async () => {
+    const category = { id: '11111111-1111-1111-1111-111111111111', nombre: 'General' }
+    const prismaStub = {
+      categoria: {
+        findUnique: async ({ where }: any) => (where.id === category.id ? category : null),
+        findFirst: async () => null,
+      },
+    }
 
-const { resolveEmailCategoriaId } = require('../src/lib/mail/helpers.ts')
+    const result = await resolveEmailCategoriaId(
+      { defaultCategoriaId: category.id } as any,
+      prismaStub as any
+    )
 
-test('returns configured category id when valid', async () => {
-  const category = { id: '11111111-1111-1111-1111-111111111111', nombre: 'General' }
-  const prismaStub = {
-    categoria: {
-      findUnique: async ({ where }: any) => (where.id === category.id ? category : null),
-      findFirst: async () => null,
-    },
-  }
+    expect(result).toBe(category.id)
+  })
 
-  const result = await resolveEmailCategoriaId(
-    { defaultCategoriaId: category.id } as any,
-    prismaStub as any
-  )
+  it('cae a la primera categoría cuando la configurada no existe', async () => {
+    const category = { id: '22222222-2222-2222-2222-222222222222', nombre: 'Soporte' }
+    const prismaStub = {
+      categoria: {
+        findUnique: async () => null,
+        findFirst: async () => category,
+      },
+    }
 
-  assert.equal(result, category.id)
-})
+    const result = await resolveEmailCategoriaId({ defaultCategoriaId: '' } as any, prismaStub as any)
 
-test('falls back to first category when configured id is missing', async () => {
-  const category = { id: '22222222-2222-2222-2222-222222222222', nombre: 'Soporte' }
-  const prismaStub = {
-    categoria: {
-      findUnique: async () => null,
-      findFirst: async () => category,
-    },
-  }
-
-  const result = await resolveEmailCategoriaId({ defaultCategoriaId: '' } as any, prismaStub as any)
-
-  assert.equal(result, category.id)
+    expect(result).toBe(category.id)
+  })
 })

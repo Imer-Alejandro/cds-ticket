@@ -23,6 +23,23 @@ app.get('/health', (req, res) => {
 // Initialize Socket.IO
 initSocketServer(httpServer)
 
+app.post('/socket/emit', (req, res) => {
+  const { event, payload, room } = req.body || {}
+  if (!event) {
+    res.status(400).json({ error: 'event is required' })
+    return
+  }
+
+  const io = (globalThis as any).__socket_io_instance__
+  if (room) {
+    io?.to(room).emit(event, payload)
+  } else {
+    io?.emit(event, payload)
+  }
+
+  res.json({ ok: true })
+})
+
 // Start Mail Listener
 startMailListener()
 

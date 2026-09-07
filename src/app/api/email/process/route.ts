@@ -4,12 +4,14 @@ import { getSession } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
-    // Verificar que sea una solicitud autorizada (admin o cron)
+    // Verificar que sea una solicitud autorizada (admin/supervisor o cron)
     const session = await getSession()
     const authHeader = req.headers.get('authorization')
     const isCronSecret = authHeader === `Bearer ${process.env.CRON_SECRET}`
+    const rol = (session as any)?.rolNombre
+    const isEquipo = rol === 'Administrador' || rol === 'Supervisor'
 
-    if (!isCronSecret && !session?.esAdmin) {
+    if (!isCronSecret && !isEquipo) {
       return NextResponse.json(
         { error: 'No autorizado' },
         { status: 401 }

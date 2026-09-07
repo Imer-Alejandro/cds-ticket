@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
-import { createNotification, notifyAgentes } from '@/lib/notifications'
+import { createNotification, emitTicketUpdate, notifyAgentes } from '@/lib/notifications'
+import { notifyByEmail, toTicketEmailData } from '@/lib/mail/notify-email'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -64,11 +65,38 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         return NextResponse.json({ error: 'No tienes permisos para reasignar tickets' }, { status: 403 })
       }
       updateData.agenteId = data.agenteId
-      logs.push({ accion: 'ASIGNACION', valorAnterior: ticket.agenteId || 'Sin asignar', valorNuevo: data.agenteId })
+      const agenteNuevo = await prisma.usuario.findUnique({
+        where: { id: data.agenteId },
+        select: { nombre: true, apellido: true },
+      })
+      const nombreNuevo = agenteNuevo ? `${agenteNuevo.nombre} ${agenteNuevo.apellido}`.trim() : data.agenteId
+      let nombreAnterior = 'Sin asignar'
+      if (ticket.agenteId) {
+        const agenteAnterior = await prisma.usuario.findUnique({
+          where: { id: ticket.agenteId },
+          select: { nombre: true, apellido: true },
+        })
+        if (agenteAnterior) nombreAnterior = `${agenteAnterior.nombre} ${agenteAnterior.apellido}`.trim()
+      }
+      logs.push({ accion: 'ASIGNACION', valorAnterior: nombreAnterior, valorNuevo: `${nombreNuevo} (${data.agenteId})` })
     }
     if (data.nivelPrioridad && data.nivelPrioridad !== ticket.nivelPrioridad) {
       updateData.nivelPrioridad = data.nivelPrioridad
       logs.push({ accion: 'CAMBIO_PRIORIDAD', valorAnterior: ticket.nivelPrioridad, valorNuevo: data.nivelPrioridad })
+    }
+    if (data.asunto && data.asunto !== ticket.asunto) {
+      if (!esMiembroEquipo && session.id !== ticket.solicitanteId) {
+        return NextResponse.json({ error: 'No tienes permisos para editar este ticket' }, { status: 403 })
+      }
+      updateData.asunto = String(data.asunto).slice(0, 200)
+      logs.push({ accion: 'CAMBIO_ASUNTO', valorAnterior: ticket.asunto, valorNuevo: updateData.asunto })
+    }
+    if (data.descripcion && data.descripcion !== ticket.descripcion) {
+      if (!esMiembroEquipo && session.id !== ticket.solicitanteId) {
+        return NextResponse.json({ error: 'No tienes permisos para editar este ticket' }, { status: 403 })
+      }
+      updateData.descripcion = String(data.descripcion)
+      logs.push({ accion: 'CAMBIO_DESCRIPCION', valorAnterior: ticket.descripcion, valorNuevo: updateData.descripcion })
     }
 
     const updated = await prisma.ticket.update({
@@ -99,6 +127,46 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (data.agenteId && data.agenteId !== ticket.agenteId) {
       await createNotification(data.agenteId, 'ASIGNACION', `Has sido asignado al ticket ${ticket.codigo}: ${ticket.asunto}`, id)
     }
+
+    // Emails: asignación al nuevo agente y cambio de estado al solicitante
+    try {
+      const mailData = toTicketEmailData({
+        codigo: ticket.codigo,
+        asunto: ticket.asunto,
+        estado: updated.estado,
+        nivelPrioridad: updated.nivelPrioridad,
+        descripcion: ticket.descripcion,
+      })
+
+      if (data.agenteId && data.agenteId !== ticket.agenteId) {
+        const agente = await prisma.usuario.findUnique({ where: { id: data.agenteId } })
+        if (agente?.correo) {
+          notifyByEmail({
+            type: 'TICKET_ASIGNADO',
+            to: agente.correo,
+            agenteNombre: `${agente.nombre} ${agente.apellido}`.trim(),
+            data: mailData,
+          })
+        }
+      }
+
+      if (data.estado) {
+        const solicitante = await prisma.usuario.findUnique({ where: { id: ticket.solicitanteId } })
+        if (solicitante?.correo) {
+          notifyByEmail({
+            type: 'ESTADO_CAMBIADO',
+            to: solicitante.correo,
+            nombre: `${solicitante.nombre} ${solicitante.apellido}`.trim(),
+            data: mailData,
+            estadoLabel: data.estado.replace(/_/g, ' '),
+          })
+        }
+      }
+    } catch {
+      // el email nunca debe romper la actualización del ticket
+    }
+
+    await emitTicketUpdate(updated, data.estado ? 'estado' : (data.agenteId ? 'asignacion' : 'update'), session.id as string)
 
     return NextResponse.json(updated)
   } catch {

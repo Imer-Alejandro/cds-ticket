@@ -8,6 +8,8 @@ declare global {
   var __socket_io_instance__: Server | undefined
 }
 
+const socketInstance = globalThis as typeof globalThis & { __socket_io_instance__?: Server }
+
 export function initSocketServer(server: HTTPServer) {
   const io = new Server(server, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
@@ -36,12 +38,12 @@ export function initSocketServer(server: HTTPServer) {
     })
   })
 
-  globalThis.__socket_io_instance__ = io
+  socketInstance.__socket_io_instance__ = io
   return io
 }
 
 export function getIO(): Server | null {
-  return globalThis.__socket_io_instance__ || null
+  return socketInstance.__socket_io_instance__ || null
 }
 
 /**

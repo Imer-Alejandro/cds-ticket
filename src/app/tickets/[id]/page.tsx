@@ -6,11 +6,14 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuthStore } from "@/store/useAuthStore"
+import { formatDateShort, formatDateTime } from "@/lib/utils"
+import { SlaBar } from "@/components/tickets/SlaBar"
+import { Modal } from "@/components/ui/modal"
 import {
   ArrowLeft, MessageSquare, RotateCcw, User, Tag, AlertCircle,
   Send, Loader2, CheckCircle2, XCircle, ChevronRight, Ticket,
   Paperclip, Clock, UserCheck, Play, History, FileText,
-  ChevronDown, Sparkles,
+  ChevronDown, Sparkles, Pencil,
 } from "lucide-react"
 
 interface AdjuntoData { id: string; nombre: string; tipo: string; url: string; data: string | null; tamaño: number | null }
@@ -19,6 +22,7 @@ interface Ticket {
   estado: string; nivelPrioridad: string; origen: string
   solicitanteId: string
   fechaCreacion: string; fechaResolucion: string | null; fechaCierre: string | null
+  fechaPrimeraRespuesta: string | null
   solicitante: { id: string; nombre: string; apellido: string; correo: string }
   agente: { id: string; nombre: string; apellido: string } | null
   categoria: { id: string; nombre: string }
@@ -81,11 +85,20 @@ export default function TicketDetailPage() {
   const [commentFiles, setCommentFiles] = useState<File[]>([])
   const [plantillas, setPlantillas] = useState<Plantilla[]>([])
   const [showPlantillas, setShowPlantillas] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
+  const [editAsunto, setEditAsunto] = useState("")
+  const [editDescripcion, setEditDescripcion] = useState("")
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const esAgente = user?.rolNombre === "Administrador" || user?.rolNombre === "Agente"
   const esAdmin = user?.rolNombre === "Administrador"
   const esSolicitante = ticket?.solicitanteId === user?.id
   const esAgenteAsignado = ticket?.agente?.id === user?.id
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     if (!params.id) return
@@ -132,8 +145,28 @@ export default function TicketDetailPage() {
 
   const insertPlantilla = (p: Plantilla) => { setComment(p.contenido); setShowPlantillas(false) }
 
+  const openEdit = () => {
+    setEditAsunto(ticket?.asunto || "")
+    setEditDescripcion(ticket?.descripcion || "")
+    setShowEdit(true)
+  }
+
+  const saveEdit = async () => {
+    if (!editAsunto.trim()) return
+    setSavingEdit(true)
+    try {
+      const res = await fetch(`/api/tickets/${params.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ asunto: editAsunto.trim(), descripcion: editDescripcion }) })
+      if (res.ok) {
+        const updated = await fetch(`/api/tickets/${params.id}`).then(r => r.json())
+        setTicket(updated)
+        setShowEdit(false)
+      } else { const err = await res.json(); alert(err.error || "Error") }
+    } catch { alert("Error de conexión") } finally { setSavingEdit(false) }
+  }
+
   const getDuration = (from: string, to?: string | null) => {
-    const mins = Math.floor(((to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime()) / 60000)
+    const now = mounted ? Date.now() : new Date(from).getTime()
+    const mins = Math.floor(((to ? new Date(to).getTime() : now) - new Date(from).getTime()) / 60000)
     if (mins < 60) return `${mins} min`
     return `${Math.floor(mins / 60)}h ${mins % 60}min`
   }
@@ -186,7 +219,7 @@ export default function TicketDetailPage() {
                 </div>
                 <h1 className="text-xl font-bold tracking-tight mt-2">{ticket.asunto}</h1>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {ticket.categoria.nombre}{ticket.cola ? ` · ${ticket.cola.nombre}` : ""} · Creado {new Date(ticket.fechaCreacion).toLocaleDateString()}
+                  {ticket.categoria.nombre}{ticket.cola ? ` · ${ticket.cola.nombre}` : ""} · Creado {formatDateShort(ticket.fechaCreacion)}
                 </p>
               </div>
             </div>
@@ -222,13 +255,20 @@ export default function TicketDetailPage() {
           {/* Descripción */}
           <Card className="rounded-2xl border-border/50 shadow-sm">
             <CardHeader className="pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="h-7 w-7 rounded-lg bg-muted flex items-center justify-center"><FileText className="h-3.5 w-3.5 text-muted-foreground" /></div>
-                <CardTitle className="text-sm font-semibold">Descripción</CardTitle>
+              <div className="flex items-center gap-2.5 justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-7 w-7 rounded-lg bg-muted flex items-center justify-center"><FileText className="h-3.5 w-3.5 text-muted-foreground" /></div>
+                  <CardTitle className="text-sm font-semibold">Descripción</CardTitle>
+                </div>
+                {(esAgente || esSolicitante) && (
+                  <Button variant="ghost" size="sm" onClick={openEdit} className="rounded-lg gap-1.5 text-xs h-8">
+                    <Pencil className="h-3.5 w-3.5" /> Editar
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="text-sm whitespace-pre-wrap leading-relaxed text-foreground/90 bg-muted/20 rounded-xl p-4 border border-border/30">{ticket.descripcion}</div>
+              <div className="max-h-[320px] overflow-auto text-sm whitespace-pre-wrap leading-relaxed text-foreground/90 bg-muted/20 rounded-xl p-4 border border-border/30">{ticket.descripcion}</div>
               {ticket.adjuntos.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {ticket.adjuntos.map(a => <AdjuntoBadge key={a.id} a={a} />)}
@@ -330,7 +370,7 @@ export default function TicketDetailPage() {
                             <span className="text-[10px] font-semibold text-yellow-600 bg-yellow-100 px-1.5 py-0.5 rounded-full">Interno</span>
                           )}
                         </div>
-                        <span className="text-xs text-muted-foreground">{new Date(c.fecha).toLocaleString()}</span>
+                        <span className="text-xs text-muted-foreground">{formatDateTime(c.fecha)}</span>
                       </div>
                       <p className="text-sm whitespace-pre-wrap leading-relaxed">{c.mensaje}</p>
                       {c.adjuntos?.length > 0 && (
@@ -390,7 +430,7 @@ export default function TicketDetailPage() {
                             <span className="font-medium">{log.valorNuevo}</span>
                           </p>
                         )}
-                        <p className="text-[10px] text-muted-foreground/50 mt-0.5">{new Date(log.fecha).toLocaleString()}</p>
+                        <p className="text-[10px] text-muted-foreground/50 mt-0.5">{formatDateTime(log.fecha)}</p>
                       </div>
                     </div>
                   ))}
@@ -430,6 +470,33 @@ export default function TicketDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* SLA */}
+          {ticket.sla && (
+            <Card className="rounded-2xl border-border/50 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">SLA</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <SlaBar
+                  createdAt={ticket.fechaCreacion}
+                  minutesResponse={ticket.sla.minutosRespuesta}
+                  minutesResolution={ticket.sla.minutosResolucion}
+                  firstResponseAt={ticket.fechaPrimeraRespuesta}
+                  resolvedAt={ticket.fechaResolucion}
+                  mode="response"
+                />
+                <SlaBar
+                  createdAt={ticket.fechaCreacion}
+                  minutesResponse={ticket.sla.minutosRespuesta}
+                  minutesResolution={ticket.sla.minutosResolucion}
+                  firstResponseAt={ticket.fechaPrimeraRespuesta}
+                  resolvedAt={ticket.fechaResolucion}
+                  mode="resolution"
+                />
+              </CardContent>
+            </Card>
+          )}
 
           {/* Asignación */}
           <Card className="rounded-2xl border-border/50 shadow-sm">
@@ -488,8 +555,8 @@ export default function TicketDetailPage() {
               <DR label="Categoría" value={ticket.categoria.nombre} />
               <DR label="Cola" value={ticket.cola?.nombre || "—"} />
               <DR label="Origen" value={ticket.origen === "WEB" ? "Web" : "Correo"} />
-              {ticket.fechaResolucion && <DR label="Resuelto" value={new Date(ticket.fechaResolucion).toLocaleString()} />}
-              {ticket.fechaCierre && <DR label="Cerrado" value={new Date(ticket.fechaCierre).toLocaleString()} />}
+              {ticket.fechaResolucion && <DR label="Resuelto" value={formatDateTime(ticket.fechaResolucion)} />}
+              {ticket.fechaCierre && <DR label="Cerrado" value={formatDateTime(ticket.fechaCierre)} />}
               <DR label="Tiempo" value={getDuration(ticket.fechaCreacion, ticket.fechaResolucion || ticket.fechaCierre)} />
             </CardContent>
           </Card>
@@ -530,6 +597,40 @@ export default function TicketDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Modal edición */}
+      <Modal open={showEdit} onClose={() => setShowEdit(false)} title={`Editar ${ticket.codigo}`}
+        footer={
+          <>
+            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setShowEdit(false)}>Cancelar</Button>
+            <Button size="sm" className="rounded-xl gap-2" disabled={savingEdit || !editAsunto.trim()} onClick={saveEdit}>
+              {savingEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Guardar cambios
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Asunto</label>
+            <input
+              value={editAsunto}
+              onChange={e => setEditAsunto(e.target.value)}
+              maxLength={200}
+              className="flex w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Descripción</label>
+            <textarea
+              value={editDescripcion}
+              onChange={e => setEditDescripcion(e.target.value)}
+              rows={7}
+              className="flex w-full rounded-xl border border-input bg-background px-4 py-3 text-sm resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

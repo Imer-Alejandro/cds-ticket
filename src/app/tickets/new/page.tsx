@@ -154,7 +154,7 @@ export default function NewTicketPage() {
                     onChange={e => setForm({ ...form, descripcion: e.target.value })}
                     placeholder="Describe el problema en detalle. Incluye pasos para reproducirlo, mensajes de error, etc."
                     rows={6}
-                    className="flex w-full rounded-xl border border-input bg-transparent px-4 py-3 text-sm resize-y min-h-[140px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="flex w-full rounded-xl border border-input bg-transparent px-4 py-3 text-sm resize-y min-h-[140px] max-h-[320px] overflow-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     maxLength={2000}
                   />
                   <p className="text-xs text-muted-foreground text-right">{form.descripcion.length}/2000</p>

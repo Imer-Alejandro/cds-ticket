@@ -12,7 +12,7 @@ export async function GET() {
       orderBy: { fecha: 'desc' },
       take: 50,
       include: {
-        ticket: { select: { codigo: true, asunto: true } },
+        ticket: { select: { id: true, codigo: true, asunto: true } },
       },
     })
     const noLeidas = await prisma.notificacion.count({

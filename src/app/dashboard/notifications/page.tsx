@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Bell, CheckCheck, Loader2, ChevronRight, Filter, ArrowLeft } from "lucide-react"
 import Link from "next/link"
+import { formatDateTime } from "@/lib/utils"
 
 interface Notificacion {
   id: string; tipo: string; mensaje: string; leido: boolean; fecha: string
-  ticket: { codigo: string; asunto: string }
+  ticket: { id: string; codigo: string; asunto: string }
 }
 
 const notifIcon: Record<string, string> = {
@@ -140,7 +141,7 @@ export default function NotificationsPage() {
               {filtered.map(n => (
                 <div key={n.id}
                   className={`flex items-start gap-4 px-2 py-4 rounded-xl transition-colors ${n.leido ? "" : "bg-accent/20"} hover:bg-accent/30 cursor-pointer`}
-                  onClick={() => { markRead(n.id); router.push(`/tickets/${n.ticket?.codigo?.replace('TK-', '') || ''}`) }}
+                  onClick={() => { markRead(n.id); router.push(`/tickets/${n.ticket?.id || n.ticket?.codigo?.replace('TK-', '') || ''}`) }}
                 >
                   <span className="text-xl mt-0.5 shrink-0">{notifIcon[n.tipo] || "🔔"}</span>
                   <div className="flex-1 min-w-0">
@@ -154,7 +155,7 @@ export default function NotificationsPage() {
                       )}
                     </div>
                     <p className={`text-sm mt-0.5 ${n.leido ? "text-muted-foreground" : "text-foreground font-medium"}`}>{n.mensaje}</p>
-                    <p className="text-xs text-muted-foreground/60 mt-1">{new Date(n.fecha).toLocaleString()}</p>
+                    <p className="text-xs text-muted-foreground/60 mt-1">{formatDateTime(n.fecha)}</p>
                   </div>
                   {!n.leido && (
                     <Button variant="ghost" size="sm" className="shrink-0 rounded-lg h-8" onClick={(e) => { e.stopPropagation(); markRead(n.id) }}>

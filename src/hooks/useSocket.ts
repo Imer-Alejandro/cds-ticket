@@ -8,13 +8,14 @@ interface NotificationEvent {
   type: string
   notificacion: {
     id: string; tipo: string; mensaje: string; leido: boolean; fecha: string
-    ticket: { codigo: string; asunto: string }
+    ticket: { id: string; codigo: string; asunto: string }
   }
 }
 
 type EventCallback = (data: NotificationEvent) => void
 
 const listeners = new Map<string, Set<EventCallback>>()
+let socketInstance: Socket | null = null
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001'
 
@@ -29,11 +30,19 @@ export function useSocket() {
   const { token } = useAuthStore()
 
   useEffect(() => {
-    if (!token || socketRef.current?.connected) return
+    if (!token) return
+
+    if (socketInstance?.connected) {
+      socketRef.current = socketInstance
+      return
+    }
 
     const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
     })
 
     socket.on('connect', () => {
@@ -50,15 +59,24 @@ export function useSocket() {
       if (cbs) cbs.forEach(cb => cb(data))
     })
 
+    socket.on('ticketUpdated', (data: any) => {
+      const cbs = listeners.get('ticketUpdated')
+      if (cbs) cbs.forEach(cb => cb(data))
+    })
+
     socket.on('disconnect', () => {
       console.log('[Socket.IO] Desconectado')
     })
 
+    socketInstance = socket
     socketRef.current = socket
 
     return () => {
-      socket.disconnect()
-      socketRef.current = null
+      if (socketRef.current === socket) {
+        socket.disconnect()
+        socketRef.current = null
+        socketInstance = null
+      }
     }
   }, [token])
 
