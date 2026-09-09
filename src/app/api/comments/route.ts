@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { hasPermission } from '@/lib/permissions'
 import { createNotification, emitTicketUpdate } from '@/lib/notifications'
 import { notifyByEmail, toTicketEmailData } from '@/lib/mail/notify-email'
 
@@ -39,16 +40,27 @@ export async function POST(request: Request) {
     })
     if (!ticket) return NextResponse.json({ error: 'Ticket no encontrado' }, { status: 404 })
 
-    const rolNombre = (session as { rolNombre?: string }).rolNombre
-    const esMiembroEquipo = rolNombre === 'Agente' || rolNombre === 'Administrador'
+    const userExists = await prisma.usuario.findUnique({
+      where: { id: session.id as string },
+      select: { id: true, nombre: true, apellido: true },
+    })
+    if (!userExists) {
+      return NextResponse.json(
+        { error: 'Usuario de sesión no encontrado en la base de datos. Por favor vuelva a iniciar sesión.' },
+        { status: 401 },
+      )
+    }
+
+    const esMiembroEquipo = hasPermission(session, 'tickets.viewAssigned')
+    const puedeVerComentariosInternos = hasPermission(session, 'tickets.viewInternalComments')
     const esSolicitante = ticket.solicitanteId === session.id
 
     if (!esMiembroEquipo && !esSolicitante) {
       return NextResponse.json({ error: 'No tienes permiso para comentar en este ticket' }, { status: 403 })
     }
 
-    const esInterno = esMiembroEquipo ? Boolean(data.esInterno) : false
-    const nombreAutor = `${(session as { nombre?: string }).nombre || ''}`.trim() || (session.id as string)
+    const esInterno = esMiembroEquipo && puedeVerComentariosInternos ? Boolean(data.esInterno) : false
+    const nombreAutor = `${userExists.nombre} ${userExists.apellido}`.trim() || (session.id as string)
 
     const comment = await prisma.comentario.create({
       data: {
@@ -71,7 +83,7 @@ export async function POST(request: Request) {
           tipo: a.tipo || 'application/octet-stream',
           url: a.url || '',
           data: a.data,
-          tamaño: a.tamaño,
+          tamaño: typeof a.tamaño === 'number' ? Math.round(a.tamaño) : null,
         })),
       })
     }
@@ -112,7 +124,7 @@ export async function POST(request: Request) {
     }
 
     if (!data.esInterno) {
-      if (ticket.solicitanteId !== session.id) {
+      if (ticket.solicitanteId && ticket.solicitanteId !== session.id) {
         await createNotification(ticket.solicitanteId, 'NUEVO_COMENTARIO', `Nuevo comentario en ${ticket.codigo}`, ticket.id)
       }
       if (ticket.agenteId && ticket.agenteId !== session.id) {
@@ -135,7 +147,7 @@ export async function POST(request: Request) {
           descripcion: '',
         })
 
-        if (ticket.solicitanteId !== session.id) {
+        if (ticket.solicitanteId && ticket.solicitanteId !== session.id) {
           const solicitante = await prisma.usuario.findUnique({ where: { id: ticket.solicitanteId } })
           if (solicitante?.correo) {
             notifyByEmail({
@@ -159,8 +171,8 @@ export async function POST(request: Request) {
             })
           }
         }
-      } catch {
-        // el email no debe romper el comentario
+      } catch (e) {
+        console.error('Error enviando email de comentario:', e)
       }
     }
 
@@ -175,7 +187,9 @@ export async function POST(request: Request) {
     )
 
     return NextResponse.json(comment, { status: 201 })
-  } catch {
-    return NextResponse.json({ error: 'Error al crear comentario' }, { status: 500 })
+  } catch (error) {
+    console.error('Error al crear comentario en POST /api/comments:', error)
+    const errorMsg = error instanceof Error ? error.message : 'Error al crear comentario'
+    return NextResponse.json({ error: errorMsg }, { status: 500 })
   }
 }

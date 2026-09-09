@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { getSession } from "@/lib/auth"
+import { hasPermission } from "@/lib/permissions"
 
 export async function POST(
   request: Request,
@@ -20,6 +21,27 @@ export async function POST(
 
     const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } })
     if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 })
+
+    const puedeVerTodo = hasPermission(session, 'tickets.viewAll')
+    const puedeVerAsignados = hasPermission(session, 'tickets.viewAssigned')
+    const puedeVerPropios = hasPermission(session, 'tickets.viewOwn')
+    const puedeVerComentariosInternos = hasPermission(session, 'tickets.viewInternalComments')
+    const esSolicitante = ticket.solicitanteId === (session.id as string)
+    const esAgenteAsignado = ticket.agenteId === (session.id as string)
+
+    const tieneAcceso =
+      puedeVerTodo ||
+      esAgenteAsignado ||
+      (puedeVerPropios && esSolicitante) ||
+      (puedeVerAsignados && esSolicitante)
+
+    if (!tieneAcceso) {
+      return NextResponse.json({ error: "No tienes acceso a este ticket" }, { status: 403 })
+    }
+
+    if (esInterno && !puedeVerComentariosInternos) {
+      return NextResponse.json({ error: "No tienes permisos para crear comentarios internos" }, { status: 403 })
+    }
 
     const comentario = await prisma.comentario.create({
       data: {

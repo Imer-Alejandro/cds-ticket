@@ -1,4 +1,4 @@
-import { extractTicketCode, isReplyEmail, nextTicketCode, emailBodyToText, normalizeFromAddress } from './core'
+import { extractTicketCode, isReplyEmail, nextTicketCode, emailBodyToText, normalizeFromAddress, cleanReplyText } from './core'
 import type { AgenteCandidato } from '@/lib/assignment'
 
 export interface IncomingEmail {
@@ -6,6 +6,9 @@ export interface IncomingEmail {
   subject?: string | null
   text?: string | null
   html?: string | null
+  inReplyTo?: string | null
+  references?: string | string[] | null
+  messageId?: string | null
   attachments?: { content: string | Buffer; contentType?: string; filename?: string }[]
   [key: string]: unknown
 }
@@ -17,10 +20,14 @@ export interface ParsedDecision {
 }
 
 /** Decide si un correo entrante es una respuesta a un ticket o una nueva solicitud. */
-export function decideIncomingEmail(from: any, subject?: string | null): ParsedDecision {
+export function decideIncomingEmail(
+  from: any,
+  subject?: string | null,
+  headers?: { inReplyTo?: string | null; references?: string | string[] | null; messageId?: string | null } | null
+): ParsedDecision {
   const fromEmail = normalizeFromAddress(from)
-  if (isReplyEmail(subject)) {
-    return { kind: 'reply', codigo: extractTicketCode(subject), fromEmail }
+  if (isReplyEmail(subject, headers)) {
+    return { kind: 'reply', codigo: extractTicketCode(subject, headers), fromEmail }
   }
   return { kind: 'new', codigo: null, fromEmail }
 }
@@ -49,6 +56,14 @@ export interface TicketRepo {
   adjunto: { createMany(args: any): Promise<any> }
   sla: { findFirst(args: any): Promise<any> }
   cola: { findFirst(args: any): Promise<any> }
+  etiqueta?: {
+    findFirst(args: any): Promise<any>
+    create(args: any): Promise<any>
+  }
+  ticketEtiqueta?: {
+    findFirst(args: any): Promise<any>
+    create(args: any): Promise<any>
+  }
 }
 
 export interface IngestResult {
@@ -80,7 +95,7 @@ export interface IngestDeps {
 
 /**
  * Crea un comentario en el ticket original cuando llega una respuesta por correo.
- * Marca la primera respuesta (para SLA) si el ticket no tenía ninguna.
+ * Asigna automáticamente la etiqueta "Solicitante respondió" y limpia la cita del correo previo.
  */
 async function replyToTicket(deps: IngestDeps, email: IncomingEmail, codigo: string) {
   const { repo, log } = deps
@@ -91,17 +106,19 @@ async function replyToTicket(deps: IngestDeps, email: IncomingEmail, codigo: str
   }
 
   const fromEmail = normalizeFromAddress(email.from) || ''
-  const body = emailBodyToText(email as any)
+  const rawBody = emailBodyToText(email as any, 5000)
+  const cleanedBody = cleanReplyText(rawBody)
+
   const comment = await repo.comentario.create({
     data: {
       ticketId: ticket.id,
       usuarioId: ticket.solicitanteId,
-      mensaje: body,
+      mensaje: cleanedBody || rawBody,
       esInterno: false,
     },
   })
 
-  const firstResponse = await repo.logTicket.create({
+  await repo.logTicket.create({
     data: {
       ticketId: ticket.id,
       usuarioId: ticket.solicitanteId,
@@ -109,7 +126,30 @@ async function replyToTicket(deps: IngestDeps, email: IncomingEmail, codigo: str
       valorNuevo: `Respuesta por correo de ${fromEmail}`,
     },
   })
-  void firstResponse
+
+  // Asignar etiqueta "Solicitante respondió" si el repositorio Prisma la soporta
+  if (repo.etiqueta && repo.ticketEtiqueta) {
+    try {
+      let etiqueta = await repo.etiqueta.findFirst({ where: { nombre: 'Solicitante respondió' } })
+      if (!etiqueta) {
+        etiqueta = await repo.etiqueta.create({
+          data: { nombre: 'Solicitante respondió', color: '#f59e0b' },
+        })
+      }
+      if (etiqueta) {
+        const yaEtiquetado = await repo.ticketEtiqueta.findFirst({
+          where: { ticketId: ticket.id, etiquetaId: etiqueta.id },
+        })
+        if (!yaEtiquetado) {
+          await repo.ticketEtiqueta.create({
+            data: { ticketId: ticket.id, etiquetaId: etiqueta.id },
+          })
+        }
+      }
+    } catch (err) {
+      log?.(`[Mail] No se pudo asignar etiqueta "Solicitante respondió": ${(err as Error).message}`)
+    }
+  }
 
   if (adjuntosValidos(email.attachments).length) {
     await repo.adjunto.createMany({
@@ -135,16 +175,18 @@ async function replyToTicket(deps: IngestDeps, email: IncomingEmail, codigo: str
 /**
  * Punto de entrada unificado: procesa un correo entrante y crea ticket (nuevo)
  * o comenta el ticket existente (respuesta). Devuelve el resultado o null.
- *
- * Este es el corazón compartido que usan tanto el listener de Next.js
- * (cron) como el backend del servidor de correo.
  */
 export async function handleIncomingEmail(
   deps: IngestDeps,
   email: IncomingEmail
 ): Promise<IngestResult | null> {
   const { repo, log } = deps
-  const decision = decideIncomingEmail(email.from, email.subject)
+  const headers = {
+    inReplyTo: (email as any).inReplyTo || (email as any).headers?.get?.('in-reply-to'),
+    references: (email as any).references || (email as any).headers?.get?.('references'),
+    messageId: (email as any).messageId || (email as any).headers?.get?.('message-id'),
+  }
+  const decision = decideIncomingEmail(email.from, email.subject, headers)
   const fromEmail = decision.fromEmail
 
   if (!fromEmail) {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { hasPermission } from '@/lib/permissions'
 
 export async function GET() {
   try {
@@ -31,8 +32,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
     }
 
-    // Validación básica de rol: Solo Admin o Supervisor debería crear departamentos
-    if (session.rolNombre !== 'Administrador' && session.rolNombre !== 'Supervisor') {
+    if (!hasPermission(session, 'settings.departments.create')) {
       return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
     }
 

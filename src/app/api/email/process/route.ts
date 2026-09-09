@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { processIncomingEmails } from '@/lib/mail/listener'
 import { getSession } from '@/lib/auth'
+import { hasPermission } from '@/lib/permissions'
 
 export async function POST(req: NextRequest) {
   try {
-    // Verificar que sea una solicitud autorizada (admin/supervisor o cron)
+    // Verificar que sea una solicitud autorizada (quien configura el correo o cron)
     const session = await getSession()
     const authHeader = req.headers.get('authorization')
     const isCronSecret = authHeader === `Bearer ${process.env.CRON_SECRET}`
-    const rol = (session as any)?.rolNombre
-    const isEquipo = rol === 'Administrador' || rol === 'Supervisor'
+    const isEquipo = session ? hasPermission(session, 'settings.email.edit') : false
 
     if (!isCronSecret && !isEquipo) {
       return NextResponse.json(

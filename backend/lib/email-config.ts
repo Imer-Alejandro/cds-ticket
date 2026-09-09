@@ -1,6 +1,11 @@
 import { getPrisma } from './prisma'
 
 export interface EmailConfig {
+  authMode: 'password' | 'oauth2'
+  tenantId: string
+  clientId: string
+  clientSecret: string
+  refreshToken: string
   enabled: boolean
   imapHost: string
   imapPort: number
@@ -20,6 +25,11 @@ export interface EmailConfig {
 }
 
 const DEFAULTS: EmailConfig = {
+  authMode: 'password',
+  tenantId: 'common',
+  clientId: '',
+  clientSecret: '',
+  refreshToken: '',
   enabled: false,
   imapHost: '',
   imapPort: 993,
@@ -39,6 +49,7 @@ const DEFAULTS: EmailConfig = {
 }
 
 const KEYS: (keyof EmailConfig)[] = [
+  'authMode', 'tenantId', 'clientId', 'clientSecret', 'refreshToken',
   'enabled', 'imapHost', 'imapPort', 'imapSecure', 'imapUser', 'imapPass',
   'imapFolder', 'smtpHost', 'smtpPort', 'smtpSecure', 'smtpUser', 'smtpPass',
   'fromAddress', 'fromName', 'checkInterval', 'defaultCategoriaId',

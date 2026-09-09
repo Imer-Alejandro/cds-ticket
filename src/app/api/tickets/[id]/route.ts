@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
-import { createNotification, emitTicketUpdate, notifyAgentes } from '@/lib/notifications'
+import { hasPermission } from '@/lib/permissions'
+import { createNotification, emitTicketUpdate } from '@/lib/notifications'
 import { notifyByEmail, toTicketEmailData } from '@/lib/mail/notify-email'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -32,6 +33,30 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     })
 
     if (!ticket) return NextResponse.json({ error: 'Ticket no encontrado' }, { status: 404 })
+
+    // Scope check: requester only sees own tickets; agents see assigned; admins see all
+    const puedeVerTodo = hasPermission(session, 'tickets.viewAll')
+    const puedeVerAsignados = hasPermission(session, 'tickets.viewAssigned')
+    const puedeVerPropios = hasPermission(session, 'tickets.viewOwn')
+    const esSolicitante = ticket.solicitanteId === (session.id as string)
+    const esAgenteAsignado = ticket.agenteId === (session.id as string)
+
+    const tieneAcceso =
+      puedeVerTodo ||
+      esAgenteAsignado ||
+      (puedeVerPropios && esSolicitante) ||
+      (puedeVerAsignados && esSolicitante)
+
+    if (!tieneAcceso) {
+      return NextResponse.json({ error: 'No tienes acceso a este ticket' }, { status: 403 })
+    }
+
+    // Requesters must not see internal comments
+    const puedeVerComentariosInternos = hasPermission(session, 'tickets.viewInternalComments')
+    if (!puedeVerComentariosInternos) {
+      ticket.comentarios = ticket.comentarios.filter((c) => !c.esInterno)
+    }
+
     return NextResponse.json(ticket)
   } catch {
     return NextResponse.json({ error: 'Error al obtener ticket' }, { status: 500 })
@@ -48,13 +73,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const ticket = await prisma.ticket.findUnique({ where: { id } })
     if (!ticket) return NextResponse.json({ error: 'Ticket no encontrado' }, { status: 404 })
 
-    const rolNombre = (session as { rolNombre?: string }).rolNombre
-    const esMiembroEquipo = rolNombre === 'Agente' || rolNombre === 'Administrador'
+    const esMiembroEquipo = hasPermission(session, 'tickets.viewAssigned')
+    const puedeEditar = hasPermission(session, 'tickets.edit')
+    const puedeCambiarEstado = hasPermission(session, 'tickets.changeStatus')
+    const puedeAsignar = hasPermission(session, 'tickets.assign')
 
     const updateData: any = {}
     const logs: { accion: string; valorAnterior?: string; valorNuevo?: string }[] = []
 
     if (data.estado && data.estado !== ticket.estado) {
+      if (!puedeCambiarEstado) {
+        return NextResponse.json({ error: 'No tienes permisos para cambiar el estado' }, { status: 403 })
+      }
       updateData.estado = data.estado
       logs.push({ accion: 'CAMBIO_ESTADO', valorAnterior: ticket.estado, valorNuevo: data.estado })
       if (data.estado === 'RESUELTO') updateData.fechaResolucion = new Date()
@@ -62,7 +92,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (data.estado === 'PENDIENTE') updateData.fechaPendiente = new Date()
     }
     if (data.agenteId && data.agenteId !== ticket.agenteId) {
-      if (!esMiembroEquipo) {
+      if (!esMiembroEquipo || !puedeAsignar) {
         return NextResponse.json({ error: 'No tienes permisos para reasignar tickets' }, { status: 403 })
       }
       updateData.agenteId = data.agenteId
@@ -82,18 +112,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       logs.push({ accion: 'ASIGNACION', valorAnterior: nombreAnterior, valorNuevo: `${nombreNuevo} (${data.agenteId})` })
     }
     if (data.nivelPrioridad && data.nivelPrioridad !== ticket.nivelPrioridad) {
+      if (!puedeCambiarEstado) {
+        return NextResponse.json({ error: 'No tienes permisos para cambiar la prioridad' }, { status: 403 })
+      }
       updateData.nivelPrioridad = data.nivelPrioridad
       logs.push({ accion: 'CAMBIO_PRIORIDAD', valorAnterior: ticket.nivelPrioridad, valorNuevo: data.nivelPrioridad })
     }
     if (data.asunto && data.asunto !== ticket.asunto) {
-      if (!esMiembroEquipo && session.id !== ticket.solicitanteId) {
+      if (!puedeEditar && !esMiembroEquipo && session.id !== ticket.solicitanteId) {
         return NextResponse.json({ error: 'No tienes permisos para editar este ticket' }, { status: 403 })
       }
       updateData.asunto = String(data.asunto).slice(0, 200)
       logs.push({ accion: 'CAMBIO_ASUNTO', valorAnterior: ticket.asunto, valorNuevo: updateData.asunto })
     }
     if (data.descripcion && data.descripcion !== ticket.descripcion) {
-      if (!esMiembroEquipo && session.id !== ticket.solicitanteId) {
+      if (!puedeEditar && !esMiembroEquipo && session.id !== ticket.solicitanteId) {
         return NextResponse.json({ error: 'No tienes permisos para editar este ticket' }, { status: 403 })
       }
       updateData.descripcion = String(data.descripcion)

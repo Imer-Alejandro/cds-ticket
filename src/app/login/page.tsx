@@ -34,7 +34,8 @@ export default function LoginPage() {
       }
 
       login(data.user, data.token)
-      router.push("/dashboard")
+      const permisos = data.user?.permisos as { dashboard?: { view?: boolean } } | undefined
+      router.push(permisos?.dashboard?.view ? "/dashboard" : "/tickets")
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Error al iniciar sesión")
     } finally {

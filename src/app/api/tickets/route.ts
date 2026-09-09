@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { hasPermission } from '@/lib/permissions'
 import { notifyAgentes, createNotification } from '@/lib/notifications'
 import { notifyByEmail, toTicketEmailData } from '@/lib/mail/notify-email'
 import { nextTicketCode } from '@/lib/mail/core'
@@ -12,6 +13,14 @@ export async function GET(request: Request) {
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
+    const puedeVerTodo = hasPermission(session, 'tickets.viewAll')
+    const puedeVerAsignados = hasPermission(session, 'tickets.viewAssigned')
+    const puedeVerPropios = hasPermission(session, 'tickets.viewOwn')
+
+    if (!puedeVerTodo && !puedeVerAsignados && !puedeVerPropios) {
+      return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
+    }
 
     const { searchParams } = new URL(request.url)
     const search = searchParams.get('search') || ''
@@ -50,6 +59,19 @@ export async function GET(request: Request) {
     if (asignadosA) where.agenteId = asignadosA
     if (sinAsignar) where.agenteId = null
 
+    // Scope filtering by role permissions
+    if (!puedeVerTodo) {
+      const scopeFilters: any[] = []
+      if (puedeVerAsignados) {
+        const asignadoOR: any[] = [{ agenteId: session.id as string }]
+        if (puedeVerPropios) asignadoOR.push({ solicitanteId: session.id as string })
+        scopeFilters.push({ OR: asignadoOR })
+      } else if (puedeVerPropios) {
+        scopeFilters.push({ solicitanteId: session.id as string })
+      }
+      if (scopeFilters.length) where.AND = scopeFilters
+    }
+
     const [tickets, total] = await Promise.all([
       prisma.ticket.findMany({
         where,
@@ -76,6 +98,7 @@ export async function POST(request: Request) {
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+    if (!hasPermission(session, 'tickets.create')) return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
 
     const data = await request.json()
     if (!data.asunto || !data.descripcion || !data.categoriaId) {
@@ -91,8 +114,7 @@ export async function POST(request: Request) {
     })
     if (!categoria) return NextResponse.json({ error: 'Categoría no encontrada' }, { status: 404 })
 
-    const rolNombre = (session as { rolNombre?: string }).rolNombre
-    const esMiembroEquipo = rolNombre === 'Agente' || rolNombre === 'Administrador'
+    const esMiembroEquipo = hasPermission(session, 'tickets.viewAssigned')
 
     // Asignación: miembro del equipo se autoasigna (o usa el agente explícito);
     // el resto de solicitantes reciben asignación automática por carga de la cola.

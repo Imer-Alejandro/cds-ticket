@@ -1,17 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
+import { hasPermission } from '@/lib/permissions'
 import { loadEmailConfig, saveEmailConfig } from '@/lib/mail/config'
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const session = await getSession()
-    const rol = (session as any)?.rolNombre
-    if (!session || (rol !== 'Administrador' && rol !== 'Supervisor')) {
+    if (!session || !hasPermission(session, 'settings.email.view')) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
     }
 
     const config = await loadEmailConfig()
-    return NextResponse.json(config)
+    return NextResponse.json({
+      ...config,
+      imapPass: '',
+      smtpPass: '',
+      clientSecret: '',
+      refreshToken: '',
+      hasClientSecret: Boolean(config.clientSecret),
+      hasRefreshToken: Boolean(config.refreshToken),
+    })
   } catch (error) {
     console.error('Error loading email config:', error)
     return NextResponse.json(
@@ -24,8 +32,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const session = await getSession()
-    const rol = (session as any)?.rolNombre
-    if (!session || (rol !== 'Administrador' && rol !== 'Supervisor')) {
+    if (!session || !hasPermission(session, 'settings.email.edit')) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
     }
 

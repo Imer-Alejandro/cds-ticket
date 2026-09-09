@@ -58,6 +58,22 @@ Usuario: tu-email@empresa.onmicrosoft.com
 Contraseña: Tu contraseña
 ```
 
+#### Microsoft 365 con OAuth2 (recomendado)
+
+Si Microsoft 365 muestra `Login is disabled`, selecciona **Microsoft 365 OAuth2** en la pantalla de configuración. Registra una aplicación en Microsoft Entra ID con una plataforma Web y esta URI de redirección:
+
+```text
+https://tu-dominio.com/api/settings/email/oauth/callback
+```
+
+En desarrollo:
+
+```text
+http://localhost:3000/api/settings/email/oauth/callback
+```
+
+Agrega los permisos delegados `IMAP.AccessAsUser.All`, `SMTP.Send` y `offline_access`, concede consentimiento de administrador si la organización lo solicita y genera un client secret. Captura el **Tenant ID**, **Application (client) ID** y **Client secret** en la aplicación. Después pulsa **Conectar con Microsoft 365** y autoriza el buzón. El sistema guardará el refresh token y lo renovará automáticamente.
+
 ### 4. **Configurar Canalización de Peticiones**
 
 #### a) **Seleccionar Categoría por Defecto**

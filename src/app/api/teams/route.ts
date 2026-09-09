@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { hasPermission } from '@/lib/permissions'
 
 export async function GET() {
   try {
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
-    if (session.rolNombre !== 'Administrador') return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
+    if (!hasPermission(session, 'settings.teams.create')) return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
 
     const data = await request.json()
     if (!data.nombre || !data.supervisorId) {

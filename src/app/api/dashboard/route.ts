@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
+import { getSession } from "@/lib/auth"
+import { hasPermission } from "@/lib/permissions"
 
 export async function GET(request: Request) {
   try {
+    const session = await getSession()
+    if (!session || !hasPermission(session, "dashboard.view")) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 })
+    }
+
     const { searchParams } = new URL(request.url)
     const daysParam = searchParams.get("days")
     const desdeParam = searchParams.get("desde")

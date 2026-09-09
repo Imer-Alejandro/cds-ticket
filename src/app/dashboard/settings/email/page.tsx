@@ -15,6 +15,8 @@ export default function EmailSettingsPage() {
   const [saving, setSaving] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
   const [form, setForm] = useState({
+    authMode: 'password' as 'password' | 'oauth2',
+    tenantId: 'common', clientId: '', clientSecret: '', refreshToken: '',
     enabled: false,
     imapHost: '', imapPort: '993', imapSecure: true, imapUser: '', imapPass: '',
     imapFolder: 'INBOX',
@@ -31,6 +33,9 @@ export default function EmailSettingsPage() {
     ]).then(([cfg, cats]) => {
       setForm(prev => ({ ...prev, ...cfg }))
       setCategories(cats || [])
+      const oauth = new URLSearchParams(window.location.search).get('oauth')
+      if (oauth === 'connected') setTestResult('ok')
+      if (oauth === 'error') setTestResult('error')
     }).finally(() => setLoading(false))
   }, [])
 
@@ -44,6 +49,20 @@ export default function EmailSettingsPage() {
       else setTestResult('error')
     } catch { setTestResult('error') }
     finally { setSaving(false) }
+  }
+
+  const handleOAuthConnect = async () => {
+    setSaving(true); setTestResult(null)
+    try {
+      const res = await apiFetch('/api/settings/email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
+      })
+      if (!res.ok) throw new Error('No se pudo guardar la configuración OAuth2')
+      window.location.href = '/api/settings/email/oauth/start'
+    } catch {
+      setTestResult('error')
+      setSaving(false)
+    }
   }
 
   if (loading) return (
@@ -98,6 +117,26 @@ export default function EmailSettingsPage() {
               <input type="checkbox" checked={form.enabled} onChange={e => setForm({ ...form, enabled: e.target.checked })} className="rounded" />
               <span>Activar recepción automática de correos</span>
             </label>
+            <Field label="Autenticación">
+              <select value={form.authMode} onChange={e => setForm({ ...form, authMode: e.target.value as 'password' | 'oauth2' })}
+                className="flex h-10 w-full rounded-xl border border-input bg-transparent px-3 text-sm"
+              >
+                <option value="password">Usuario y contraseña</option>
+                <option value="oauth2">Microsoft 365 OAuth2</option>
+              </select>
+            </Field>
+            {form.authMode === 'oauth2' && (
+              <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3">
+                <FieldInput label="Tenant ID" value={form.tenantId} onChange={e => setForm({ ...form, tenantId: e.target.value })} placeholder="common o ID del directorio" />
+                <FieldInput label="Application (client) ID" value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })} placeholder="ID de la aplicación en Entra ID" />
+                <FieldInput label="Client secret" type="password" value={form.clientSecret} onChange={e => setForm({ ...form, clientSecret: e.target.value })} placeholder="Secreto de la aplicación" />
+                <FieldInput label="Refresh token" type="password" value={form.refreshToken} onChange={e => setForm({ ...form, refreshToken: e.target.value })} placeholder="Se completa al conectar" />
+                <Button type="button" variant="outline" onClick={() => { void handleOAuthConnect() }} disabled={saving}>
+                  Conectar con Microsoft 365
+                </Button>
+                <p className="text-xs text-muted-foreground">Registra como URI de redirección: /api/settings/email/oauth/callback</p>
+              </div>
+            )}
             <FieldInput label="Servidor IMAP" value={form.imapHost} onChange={e => setForm({ ...form, imapHost: e.target.value })} placeholder="mail.sudominio.com" />
             <div className="grid grid-cols-2 gap-3">
               <FieldInput label="Puerto" value={form.imapPort} onChange={e => setForm({ ...form, imapPort: e.target.value })} placeholder="993" />
@@ -135,9 +174,10 @@ export default function EmailSettingsPage() {
               <FieldInput label="Puerto" value={form.smtpPort} onChange={e => setForm({ ...form, smtpPort: e.target.value })} placeholder="587" />
               <label className="flex items-end gap-2 text-sm pb-2">
                 <input type="checkbox" checked={form.smtpSecure} onChange={e => setForm({ ...form, smtpSecure: e.target.checked })} className="rounded" />
-                <span>SSL/TLS</span>
+                  <span>SSL directo (465)</span>
               </label>
             </div>
+              <p className="text-xs text-muted-foreground">Puerto 587: desactivado, usa STARTTLS. Puerto 465: activado.</p>
             <FieldInput label="Usuario" value={form.smtpUser} onChange={e => setForm({ ...form, smtpUser: e.target.value })} placeholder="tickets@..." />
             <FieldInput label="Contraseña" type="password" value={form.smtpPass} onChange={e => setForm({ ...form, smtpPass: e.target.value })} placeholder="••••••••" />
             <FieldInput label="Dirección Desde" value={form.fromAddress} onChange={e => setForm({ ...form, fromAddress: e.target.value })} placeholder="tickets@..." />
@@ -200,7 +240,7 @@ function ConfigurationGuide() {
           <ul className="list-disc list-inside space-y-1 text-muted-foreground text-xs">
             <li>IMAP Host: <code className="bg-white px-1 rounded">imap.outlook.com</code></li>
             <li>SMTP Host: <code className="bg-white px-1 rounded">smtp-mail.outlook.com</code></li>
-            <li>Puerto SMTP: 587 (con TLS habilitado)</li>
+            <li>Puerto SMTP: 587 (SSL directo deshabilitado, STARTTLS automático)</li>
           </ul>
         </div>
         <div className="pt-2 border-t border-blue-200">

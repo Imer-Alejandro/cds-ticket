@@ -22,33 +22,35 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/store/useAuthStore"
+import { usePermissions } from "@/hooks/usePermissions"
 import { Button } from "../ui/button"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 
 const mainNav = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Tickets", href: "/tickets", icon: TicketIcon },
-  { name: "Notificaciones", href: "/dashboard/notifications", icon: Bell },
-  { name: "Usuarios", href: "/dashboard/users", icon: Users },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, perm: "dashboard.view" },
+  { name: "Tickets", href: "/tickets", icon: TicketIcon, perm: null },
+  { name: "Notificaciones", href: "/dashboard/notifications", icon: Bell, perm: "notifications.view" },
+  { name: "Usuarios", href: "/dashboard/users", icon: Users, perm: "users.view" },
 ]
 
 const settingsItems = [
-  { name: "General", href: "/dashboard/settings", icon: Settings },
-  { name: "Departamentos", href: "/dashboard/settings/departments", icon: Building2 },
-  { name: "Categorías", href: "/dashboard/settings/categories", icon: Folders },
-  { name: "Etiquetas", href: "/dashboard/settings/labels", icon: Tags },
-  { name: "Roles", href: "/dashboard/settings/roles", icon: Shield },
-  { name: "Equipos", href: "/dashboard/settings/teams", icon: UsersRound },
-  { name: "Colas", href: "/dashboard/settings/queues", icon: Layers },
-  { name: "SLAs", href: "/dashboard/settings/sla", icon: Gauge },
-  { name: "Correo", href: "/dashboard/settings/email", icon: Mail },
+  { name: "General", href: "/dashboard/settings", icon: Settings, perm: "settings.view" },
+  { name: "Departamentos", href: "/dashboard/settings/departments", icon: Building2, perm: "settings.departments.view" },
+  { name: "Categorías", href: "/dashboard/settings/categories", icon: Folders, perm: "settings.categories.view" },
+  { name: "Etiquetas", href: "/dashboard/settings/labels", icon: Tags, perm: "settings.labels.view" },
+  { name: "Roles", href: "/dashboard/settings/roles", icon: Shield, perm: "settings.roles.view" },
+  { name: "Equipos", href: "/dashboard/settings/teams", icon: UsersRound, perm: "settings.teams.view" },
+  { name: "Colas", href: "/dashboard/settings/queues", icon: Layers, perm: "settings.queues.view" },
+  { name: "SLAs", href: "/dashboard/settings/sla", icon: Gauge, perm: "settings.sla.view" },
+  { name: "Correo", href: "/dashboard/settings/email", icon: Mail, perm: "settings.email.view" },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuthStore()
+  const { hasPermission } = usePermissions()
   const [settingsOpen, setSettingsOpen] = useState(pathname.startsWith("/dashboard/settings"))
 
   const handleLogout = async () => {
@@ -60,6 +62,10 @@ export function Sidebar() {
     }
     router.replace('/login')
   }
+
+  const filteredMainNav = mainNav.filter((item) => !item.perm || hasPermission(item.perm))
+  const filteredSettingsItems = settingsItems.filter((item) => !item.perm || hasPermission(item.perm))
+  const showSettings = filteredSettingsItems.length > 0
 
   return (
     <div className="flex h-screen w-64 flex-col border-r bg-card/50 px-4 py-6 shadow-[1px_0_10px_rgba(0,0,0,0.02)]">
@@ -75,7 +81,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto">
-        {mainNav.map((item) => {
+        {filteredMainNav.map((item) => {
           const isActive = pathname.startsWith(item.href) && 
             (item.href === "/dashboard" ? pathname === "/dashboard" : pathname === item.href)
             
@@ -96,42 +102,44 @@ export function Sidebar() {
           )
         })}
 
-        <div className="pt-6">
-          <button
-            onClick={() => setSettingsOpen(!settingsOpen)}
-            className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-all duration-200"
-          >
-            <div className="flex items-center gap-3">
-              <Settings className="h-5 w-5" />
-              Configuración
-            </div>
-            {settingsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          </button>
+        {showSettings && (
+          <div className="pt-6">
+            <button
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-all duration-200"
+            >
+              <div className="flex items-center gap-3">
+                <Settings className="h-5 w-5" />
+                Configuración
+              </div>
+              {settingsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </button>
 
-          {settingsOpen && (
-            <div className="ml-5 mt-1 space-y-1 border-l pl-3">
-              {settingsItems.map((item) => {
-                const isActive = item.href === "/dashboard/settings" 
-                  ? pathname === "/dashboard/settings"
-                  : pathname.startsWith(item.href)
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    className={cn(
-                      "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200",
-                      isActive
-                        ? "text-primary bg-primary/5"
-                        : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                    )}
-                  >
-                    {item.name}
-                  </Link>
-                )
-              })}
-            </div>
-          )}
-        </div>
+            {settingsOpen && (
+              <div className="ml-5 mt-1 space-y-1 border-l pl-3">
+                {filteredSettingsItems.map((item) => {
+                  const isActive = item.href === "/dashboard/settings" 
+                    ? pathname === "/dashboard/settings"
+                    : pathname.startsWith(item.href)
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className={cn(
+                        "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200",
+                        isActive
+                          ? "text-primary bg-primary/5"
+                          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                      )}
+                    >
+                      {item.name}
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </nav>
 
       <div className="mt-auto pt-6 pb-2 space-y-2">

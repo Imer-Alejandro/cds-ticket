@@ -13,7 +13,7 @@ describe('dominio tickets', () => {
   })
 
   it('ESTADOS_ACTIVOS excluye resueltos y cerrados', () => {
-    expect(ESTADOS_ACTIVOS).toEqual(['NUEVO', 'ASIGNADO', 'EN_PROGRESO'])
+    expect(ESTADOS_ACTIVOS).toEqual(['NUEVO', 'ASIGNADO', 'EN_PROGRESO', 'PENDIENTE'])
   })
 
   it('valida estados', () => {

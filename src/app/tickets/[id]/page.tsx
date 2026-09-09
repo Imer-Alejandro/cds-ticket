@@ -6,6 +6,7 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuthStore } from "@/store/useAuthStore"
+import { usePermissions } from "@/hooks/usePermissions"
 import { formatDateShort, formatDateTime } from "@/lib/utils"
 import { SlaBar } from "@/components/tickets/SlaBar"
 import { Modal } from "@/components/ui/modal"
@@ -54,40 +55,40 @@ const PRIORIDAD: Record<string, { label: string; color: string }> = {
   BAJA: { label: "Baja", color: "text-green-600 bg-green-50 border-green-200" },
 }
 
-type Accion = { label: string; icon: any; action: string; color: string; desc: string; role: string }
+type Accion = { label: string; icon: any; action: string; color: string; desc: string; perm: string }
 
 const ACCIONES: Record<string, Accion[]> = {
   NUEVO: [
-    { label: "Asignarme", icon: UserCheck, action: "TOMADO", color: "bg-amber-500 hover:bg-amber-600", desc: "Tomar el ticket y empezar a trabajar", role: "agente" },
-    { label: "Asignar a...", icon: User, action: "ASIGNADO", color: "bg-slate-500 hover:bg-slate-600", desc: "Asignar a otro agente", role: "admin" },
-    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "agente" },
+    { label: "Asignarme", icon: UserCheck, action: "TOMADO", color: "bg-amber-500 hover:bg-amber-600", desc: "Tomar el ticket y empezar a trabajar", perm: "tickets.assign" },
+    { label: "Asignar a...", icon: User, action: "ASIGNADO", color: "bg-slate-500 hover:bg-slate-600", desc: "Asignar a otro agente", perm: "tickets.assign" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", perm: "tickets.delete" },
   ],
   ASIGNADO: [
-    { label: "Iniciar", icon: Play, action: "EN_PROGRESO", color: "bg-blue-500 hover:bg-blue-600", desc: "Comenzar a trabajar en el ticket", role: "todos" },
-    { label: "Poner Pendiente", icon: Pause, action: "PENDIENTE", color: "bg-purple-500 hover:bg-purple-600", desc: "Poner en espera de información", role: "agente" },
-    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "agente" },
+    { label: "Iniciar", icon: Play, action: "EN_PROGRESO", color: "bg-blue-500 hover:bg-blue-600", desc: "Comenzar a trabajar en el ticket", perm: "tickets.changeStatus" },
+    { label: "Poner Pendiente", icon: Pause, action: "PENDIENTE", color: "bg-purple-500 hover:bg-purple-600", desc: "Poner en espera de información", perm: "tickets.changeStatus" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", perm: "tickets.delete" },
   ],
   EN_PROGRESO: [
-    { label: "Resolver", icon: CheckCircle2, action: "RESUELTO", color: "bg-emerald-500 hover:bg-emerald-600", desc: "Marcar como resuelto", role: "todos" },
-    { label: "Poner Pendiente", icon: Pause, action: "PENDIENTE", color: "bg-purple-500 hover:bg-purple-600", desc: "Poner en espera de información", role: "agente" },
-    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "agente" },
+    { label: "Resolver", icon: CheckCircle2, action: "RESUELTO", color: "bg-emerald-500 hover:bg-emerald-600", desc: "Marcar como resuelto", perm: "tickets.changeStatus" },
+    { label: "Poner Pendiente", icon: Pause, action: "PENDIENTE", color: "bg-purple-500 hover:bg-purple-600", desc: "Poner en espera de información", perm: "tickets.changeStatus" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", perm: "tickets.delete" },
   ],
   PENDIENTE: [
-    { label: "Reanudar", icon: Play, action: "EN_PROGRESO", color: "bg-blue-500 hover:bg-blue-600", desc: "Reanudar trabajo en el ticket", role: "todos" },
-    { label: "Resolver", icon: CheckCircle2, action: "RESUELTO", color: "bg-emerald-500 hover:bg-emerald-600", desc: "Marcar como resuelto", role: "todos" },
-    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "agente" },
+    { label: "Reanudar", icon: Play, action: "EN_PROGRESO", color: "bg-blue-500 hover:bg-blue-600", desc: "Reanudar trabajo en el ticket", perm: "tickets.changeStatus" },
+    { label: "Resolver", icon: CheckCircle2, action: "RESUELTO", color: "bg-emerald-500 hover:bg-emerald-600", desc: "Marcar como resuelto", perm: "tickets.changeStatus" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", perm: "tickets.delete" },
   ],
   RESUELTO: [
-    { label: "Cerrar", icon: XCircle, action: "CERRADO", color: "bg-slate-500 hover:bg-slate-600", desc: "Confirmar y cerrar ticket", role: "todos" },
-    { label: "Reabrir", icon: RotateCcw, action: "EN_PROGRESO", color: "bg-orange-500 hover:bg-orange-600", desc: "Volver a abrir el ticket", role: "admin" },
-    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "admin" },
+    { label: "Cerrar", icon: XCircle, action: "CERRADO", color: "bg-slate-500 hover:bg-slate-600", desc: "Confirmar y cerrar ticket", perm: "tickets.changeStatus" },
+    { label: "Reabrir", icon: RotateCcw, action: "EN_PROGRESO", color: "bg-orange-500 hover:bg-orange-600", desc: "Volver a abrir el ticket", perm: "tickets.changeStatus" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", perm: "tickets.delete" },
   ],
   CERRADO: [
-    { label: "Reabrir", icon: RotateCcw, action: "EN_PROGRESO", color: "bg-orange-500 hover:bg-orange-600", desc: "Reabrir ticket cerrado", role: "admin" },
-    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", role: "admin" },
+    { label: "Reabrir", icon: RotateCcw, action: "EN_PROGRESO", color: "bg-orange-500 hover:bg-orange-600", desc: "Reabrir ticket cerrado", perm: "tickets.changeStatus" },
+    { label: "Eliminar", icon: Trash2, action: "ELIMINADO", color: "bg-rose-500 hover:bg-rose-600", desc: "Eliminar/archivar ticket", perm: "tickets.delete" },
   ],
   ELIMINADO: [
-    { label: "Restaurar", icon: RotateCcw, action: "EN_PROGRESO", color: "bg-emerald-500 hover:bg-emerald-600", desc: "Restaurar ticket a En Progreso", role: "admin" },
+    { label: "Restaurar", icon: RotateCcw, action: "EN_PROGRESO", color: "bg-emerald-500 hover:bg-emerald-600", desc: "Restaurar ticket a En Progreso", perm: "tickets.delete" },
   ],
 }
 
@@ -112,10 +113,12 @@ export default function TicketDetailPage() {
 
   useSocket()
 
-  const esAgente = user?.rolNombre === "Administrador" || user?.rolNombre === "Agente"
-  const esAdmin = user?.rolNombre === "Administrador"
+  const { hasPermission } = usePermissions()
+  const esAgente = hasPermission("tickets.viewAssigned") || hasPermission("tickets.viewAll")
   const esSolicitante = ticket?.solicitanteId === user?.id
-  const esAgenteAsignado = ticket?.agente?.id === user?.id
+  const puedeCambiarEstado = hasPermission("tickets.changeStatus")
+  const puedeEditar = hasPermission("tickets.edit")
+  const puedeAsignar = hasPermission("tickets.assign")
 
   const refreshTicket = useCallback(async () => {
     if (!params.id) return
@@ -155,9 +158,7 @@ export default function TicketDetailPage() {
   }, [ticket])
 
   const puedeAccion = (accion: Accion) => {
-    if (accion.role === "admin") return esAdmin
-    if (accion.role === "agente") return esAgente
-    return esAgente || esAgenteAsignado || esAdmin
+    return hasPermission(accion.perm) && (esAgente || accion.perm !== "tickets.assign")
   }
 
   const updateTicket = async (data: any) => {
@@ -316,7 +317,7 @@ export default function TicketDetailPage() {
                   <div className="h-7 w-7 rounded-lg bg-muted flex items-center justify-center"><FileText className="h-3.5 w-3.5 text-muted-foreground" /></div>
                   <CardTitle className="text-sm font-semibold">Descripción</CardTitle>
                 </div>
-                {(esAgente || esSolicitante) && (
+                {(esAgente || esSolicitante) && puedeEditar && (
                   <Button variant="ghost" size="sm" onClick={openEdit} className="rounded-lg gap-1.5 text-xs h-8">
                     <Pencil className="h-3.5 w-3.5" /> Editar
                   </Button>
@@ -339,6 +340,7 @@ export default function TicketDetailPage() {
           </Card>
 
           {/* Comentarios */}
+          {esAgente && (
           <Card className="rounded-2xl border-border/50 shadow-sm">
             <CardHeader className="pb-3">
               <div className="flex items-center gap-2.5">
@@ -348,7 +350,7 @@ export default function TicketDetailPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Formulario de comentario */}
-              {(esAgente || esSolicitante) && (
+              {esAgente && (
                 <form onSubmit={addComment} className="space-y-3 bg-muted/30 rounded-xl p-4 border border-border/50">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
@@ -447,6 +449,7 @@ export default function TicketDetailPage() {
               )}
             </CardContent>
           </Card>
+          )}
 
           {/* Historial compacto */}
           <Card className="rounded-2xl border-border/50 shadow-sm">
@@ -593,7 +596,7 @@ export default function TicketDetailPage() {
               ) : (
                 <p className="text-xs text-muted-foreground italic">Sin agente asignado</p>
               )}
-              {esAgente && (
+              {puedeAsignar && (
                 <select value={ticket.agente?.id || ""}
                   onChange={e => { if (e.target.value) updateTicket({ agenteId: e.target.value, estado: ticket.estado === "NUEVO" ? "ASIGNADO" : undefined }) }}
                   className="flex h-9 w-full rounded-xl border border-input bg-transparent px-3 text-xs"
@@ -627,7 +630,7 @@ export default function TicketDetailPage() {
           </Card>
 
           {/* Prioridad */}
-          {esAdmin && (
+          {puedeCambiarEstado && (
             <Card className="rounded-2xl border-border/50 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Cambiar Prioridad</CardTitle>

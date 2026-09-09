@@ -10,7 +10,12 @@ import { emitTicketUpdate } from '@/lib/notifications'
 import { autoAssignAgent } from '@/lib/assignment'
 import { makePrismaAssignmentRepo } from '@/lib/assignment-prisma'
 
+let intervalHandle: ReturnType<typeof setInterval> | null = null
+let processing = false
+
 export async function processIncomingEmails() {
+  if (processing) return
+  processing = true
   let client: ImapFlow | null = null
   try {
     const config = await loadEmailConfig()
@@ -73,6 +78,7 @@ export async function processIncomingEmails() {
         // ignorar
       }
     }
+    processing = false
   }
 }
 
@@ -144,7 +150,29 @@ export async function processIncomingEmail(parsed: any) {
 }
 
 export function startMailListener() {
-  void processIncomingEmails()
+  stopMailListener()
+
+  void loadEmailConfig().then((config) => {
+    if (!config.enabled) {
+      console.log('Email processing is disabled')
+      return
+    }
+
+    void processIncomingEmails()
+    intervalHandle = setInterval(() => {
+      void processIncomingEmails()
+    }, Math.max(config.checkInterval, 5) * 1000)
+    console.log(`[Mail] Listener iniciado con intervalo de ${Math.max(config.checkInterval, 5)} segundos`)
+  }).catch((error) => {
+    console.error('Error iniciando listener de correo:', error)
+  })
+}
+
+export function stopMailListener() {
+  if (intervalHandle) {
+    clearInterval(intervalHandle)
+    intervalHandle = null
+  }
 }
 
 /** Compatibilidad: envía una respuesta por correo al solicitante del ticket. */

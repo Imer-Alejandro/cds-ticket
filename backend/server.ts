@@ -40,7 +40,6 @@ app.post('/socket/emit', (req, res) => {
   res.json({ ok: true })
 })
 
-// Start Mail Listener
 startMailListener()
 
 httpServer.listen(port, () => {

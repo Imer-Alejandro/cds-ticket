@@ -2,21 +2,88 @@ import type { ParsedMail } from 'mailparser'
 export { slaStatus } from '@/lib/sla'
 
 /**
- * Extrae el código de ticket (TK-#####) que aparece en el asunto de un correo,
- * para poder vincular respuestas (RE:) al ticket original.
+ * Extrae el código de ticket (TK-#####) que aparece en el asunto de un correo
+ * o en sus cabeceras In-Reply-To / References / Message-ID.
  */
-export function extractTicketCode(subject?: string | null): string | null {
-  if (!subject) return null
-  const m = subject.match(/\b(TK-\d{5})\b/i)
-  return m ? m[1] : null
+export function extractTicketCode(
+  subject?: string | null,
+  headers?: { inReplyTo?: string | null; references?: string | string[] | null; messageId?: string | null } | null
+): string | null {
+  if (subject) {
+    const m = subject.match(/\b(TK-\d{5})\b/i)
+    if (m) return m[1].toUpperCase()
+  }
+
+  if (headers) {
+    const searchStr = [
+      headers.inReplyTo,
+      headers.messageId,
+      Array.isArray(headers.references) ? headers.references.join(' ') : headers.references,
+    ].filter(Boolean).join(' ')
+
+    if (searchStr) {
+      const mHeader = searchStr.match(/\b(TK-\d{5})\b/i)
+      if (mHeader) return mHeader[1].toUpperCase()
+    }
+  }
+
+  return null
 }
 
 /**
  * Determina si un correo entrante es una respuesta a un ticket existente
- * (contiene un código TK-##### en el asunto, típicamente por prefijo RE:).
+ * (contiene código de ticket en el asunto o en sus cabeceras SMTP).
  */
-export function isReplyEmail(subject?: string | null): boolean {
-  return extractTicketCode(subject) !== null
+export function isReplyEmail(
+  subject?: string | null,
+  headers?: { inReplyTo?: string | null; references?: string | string[] | null; messageId?: string | null } | null
+): boolean {
+  return extractTicketCode(subject, headers) !== null
+}
+
+/**
+ * Limpia el cuerpo de un correo en respuesta quitando las citas del correo previo
+ * (ej. "On Mon ... wrote:", "-----Mensaje original-----", "De: Soporte", etc.).
+ */
+export function cleanReplyText(text: string): string {
+  if (!text) return ''
+
+  const lines = text.split(/\r?\n/)
+  const cleanedLines: string[] = []
+
+  const quoteMarkers = [
+    /^-----\s*Mensaje original\s*-----/i,
+    /^-----\s*Original Message\s*-----/i,
+    /^De:\s+/i,
+    /^From:\s+/i,
+    /^Enviado el:\s+/i,
+    /^Sent:\s+/i,
+    /^Para:\s+/i,
+    /^To:\s+/i,
+    /^Asunto:\s+/i,
+    /^Subject:\s+/i,
+    /^On\s+.+wrote:$/i,
+    /^El\s+.+escribió:$/i,
+    /^El\s+.+escribio:$/i,
+    /^________________________________/i,
+  ]
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const trimmed = line.trim()
+
+    if (quoteMarkers.some(r => r.test(trimmed))) {
+      break
+    }
+    if (trimmed.startsWith('>')) {
+      break
+    }
+
+    cleanedLines.push(line)
+  }
+
+  const result = cleanedLines.join('\n').trim()
+  return result || text.trim()
 }
 
 /**
@@ -72,6 +139,7 @@ export function emailBodyToText(email: Pick<ParsedMail, 'text' | 'html'> | null 
  * entrega mailparser (`from.value[].address`, `from.text`, `from.address`).
  */
 export function normalizeFromAddress(from: any): string | null {
+  if (typeof from === 'string' && from.trim()) return from.trim().toLowerCase()
   const addr = from?.value?.[0]?.address || from?.address || (typeof from?.text === 'string' ? from.text.match(/<([^>]+)>/)?.[1] : null)
   if (!addr) return null
   return String(addr).trim().toLowerCase()

@@ -3,6 +3,7 @@ import { hash } from 'bcryptjs'
 import { Pool } from 'pg'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@prisma/client'
+import { DEFAULT_PERMISSIONS } from '../src/lib/permissions'
 
 const connectionString = process.env.DATABASE_URL
 if (!connectionString) {
@@ -15,29 +16,29 @@ const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 
 async function main() {
-  // 1. ROLES
+  // 1. ROLES with granular permissions
   const adminRole = await prisma.rol.upsert({
     where: { id: '00000000-0000-0000-0000-000000000001' },
-    update: { nombre: 'Administrador', permisos: { all: true } },
-    create: { id: '00000000-0000-0000-0000-000000000001', nombre: 'Administrador', permisos: { all: true } },
+    update: { nombre: 'Administrador', permisos: DEFAULT_PERMISSIONS.Administrador as object },
+    create: { id: '00000000-0000-0000-0000-000000000001', nombre: 'Administrador', permisos: DEFAULT_PERMISSIONS.Administrador as object },
   })
 
   const supervisorRole = await prisma.rol.upsert({
     where: { id: '00000000-0000-0000-0000-000000000002' },
-    update: {},
-    create: { id: '00000000-0000-0000-0000-000000000002', nombre: 'Supervisor', permisos: { canManageTickets: true, canViewReports: true } },
+    update: { nombre: 'Supervisor', permisos: DEFAULT_PERMISSIONS.Supervisor as object },
+    create: { id: '00000000-0000-0000-0000-000000000002', nombre: 'Supervisor', permisos: DEFAULT_PERMISSIONS.Supervisor as object },
   })
 
   const agenteRole = await prisma.rol.upsert({
     where: { id: '00000000-0000-0000-0000-000000000003' },
-    update: {},
-    create: { id: '00000000-0000-0000-0000-000000000003', nombre: 'Agente', permisos: { canManageTickets: true } },
+    update: { nombre: 'Agente', permisos: DEFAULT_PERMISSIONS.Agente as object },
+    create: { id: '00000000-0000-0000-0000-000000000003', nombre: 'Agente', permisos: DEFAULT_PERMISSIONS.Agente as object },
   })
 
   const usuarioRole = await prisma.rol.upsert({
     where: { id: '00000000-0000-0000-0000-000000000004' },
-    update: {},
-    create: { id: '00000000-0000-0000-0000-000000000004', nombre: 'Usuario', permisos: { canCreateTickets: true } },
+    update: { nombre: 'Usuario', permisos: DEFAULT_PERMISSIONS.Usuario as object },
+    create: { id: '00000000-0000-0000-0000-000000000004', nombre: 'Usuario', permisos: DEFAULT_PERMISSIONS.Usuario as object },
   })
 
   // 2. DEPARTAMENTOS

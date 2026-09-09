@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { hasPermission } from '@/lib/permissions'
 
 type UpdateData = {
   nombre: string; apellido: string; correo: string; userName: string
@@ -33,7 +34,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
-    if (session.rolNombre !== 'Administrador') return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
+    if (!hasPermission(session, 'users.edit')) return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
 
     const { id } = await params
     const data = await request.json()
@@ -76,7 +77,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
-    if (session.rolNombre !== 'Administrador') return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
+    if (!hasPermission(session, 'users.delete')) return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
 
     const { id } = await params
     await prisma.usuario.delete({ where: { id } })

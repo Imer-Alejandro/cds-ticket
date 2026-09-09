@@ -41,7 +41,7 @@ function layout(title: string, body: string, base?: Partial<TicketEmailData>) {
       <div style="background:#ffffff;padding:24px;border-radius:0 0 12px 12px;color:#0f172a">
         ${body}${ticketHtml}
         <p style="color:#94a3b8;font-size:12px;margin-top:24px;border-top:1px solid #e2e8f0;padding-top:12px">
-          Este es un mensaje automático del sistema de tickets. No respondas a este correo.
+          Puedes responder directamente a este correo para agregar un comentario a este ticket.
         </p>
       </div>
     </div>
@@ -89,7 +89,7 @@ export function assignmentEmail(d: AgentEmailData): { subject: string; html: str
 /** Plantilla: cambio de estado (para el solicitante) */
 export function statusEmail(name: string, d: TicketEmailData & { estadoLabel: string }): { subject: string; html: string } {
   return {
-    subject: `Actualización ${d.codigo}: ${d.estadoLabel}`,
+    subject: `[${d.codigo}] Actualización: ${d.estadoLabel}`,
     html: layout(
       'Actualización de tu ticket',
       `
@@ -103,7 +103,7 @@ export function statusEmail(name: string, d: TicketEmailData & { estadoLabel: st
 /** Plantilla: notificación de comentario nuevo (para el solicitante o agente) */
 export function commentEmail(name: string, d: TicketEmailData, comment: string): { subject: string; html: string } {
   return {
-    subject: `Nuevo comentario en ${d.codigo}`,
+    subject: `[${d.codigo}] Nuevo comentario en: ${d.asunto}`,
     html: layout(
       'Nuevo comentario',
       `

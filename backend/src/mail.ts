@@ -7,23 +7,32 @@ import { resolveEmailCategoriaId, resolveEmailRoleId } from '../../src/lib/mail/
 import { handleIncomingEmail } from '../../src/lib/mail/ingest'
 import { autoAssignAgent } from '../../src/lib/assignment'
 import { makePrismaAssignmentRepo } from '../../src/lib/assignment-prisma'
+import { getMicrosoftAccessToken } from '../../src/lib/mail/oauth'
 
 let intervalHandle: ReturnType<typeof setInterval> | null = null
+let processing = false
 
 export async function checkMail(cfg?: EmailConfig) {
+  if (processing) return
+  processing = true
   const prisma = getPrisma()
-  const config = cfg || (await loadEmailConfig())
-  if (!config.enabled || !config.imapHost || !config.imapUser) return
-
-  const client = new ImapFlow({
-    host: config.imapHost,
-    port: config.imapPort,
-    secure: config.imapSecure,
-    auth: { user: config.imapUser, pass: config.imapPass },
-    logger: false,
-  })
+  let client: ImapFlow | null = null
 
   try {
+    const config = cfg || (await loadEmailConfig())
+    if (!config.enabled || !config.imapHost || !config.imapUser) return
+
+    const accessToken = config.authMode === 'oauth2' ? await getMicrosoftAccessToken(config as any) : null
+    if (config.authMode !== 'oauth2' && !config.imapPass) return
+
+    client = new ImapFlow({
+      host: config.imapHost,
+      port: config.imapPort,
+      secure: config.imapSecure,
+      auth: accessToken ? { user: config.imapUser, accessToken } : { user: config.imapUser, pass: config.imapPass },
+      logger: false,
+    })
+
     await client.connect()
     const lock = await client.getMailboxLock(config.imapFolder)
     try {
@@ -79,7 +88,14 @@ export async function checkMail(cfg?: EmailConfig) {
   } catch (err) {
     console.error('[Mail] Error de conexión IMAP:', err)
   } finally {
-    await client.logout()
+    if (client) {
+      try {
+        await client.logout()
+      } catch {
+        // ignorar errores de cierre de conexión
+      }
+    }
+    processing = false
   }
 }
 
@@ -96,11 +112,9 @@ export function startMailListener(cfg?: EmailConfig) {
   }
 
   loadEmailConfig().then((c) => {
-    if (c.enabled) {
-      checkMail(c)
-      intervalHandle = setInterval(() => checkMail(c), (c.checkInterval || 10) * 1000)
-      console.log('[Mail] Listener iniciado con intervalo de', c.checkInterval || 10, 'segundos')
-    }
+    void checkMail(c)
+    intervalHandle = setInterval(() => void checkMail(), Math.max(c.checkInterval || 10, 5) * 1000)
+    console.log('[Mail] Listener iniciado con intervalo de', Math.max(c.checkInterval || 10, 5), 'segundos')
   })
 }
 

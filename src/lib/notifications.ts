@@ -29,22 +29,27 @@ export async function createNotification(
   mensaje: string,
   ticketId: string,
 ) {
-  const notificacion = await prisma.notificacion.create({
-    data: { usuarioId, tipo, mensaje, ticketId },
-    include: { ticket: { select: { id: true, codigo: true, asunto: true } } },
-  })
+  if (!usuarioId) return
+  try {
+    const notificacion = await prisma.notificacion.create({
+      data: { usuarioId, tipo, mensaje, ticketId },
+      include: { ticket: { select: { id: true, codigo: true, asunto: true } } },
+    })
 
-  await emitSocketEvent('notificacion', {
-    type: tipo,
-    notificacion: {
-      id: notificacion.id,
-      tipo: notificacion.tipo,
-      mensaje: notificacion.mensaje,
-      leido: notificacion.leido,
-      fecha: notificacion.fecha.toISOString(),
-      ticket: notificacion.ticket,
-    },
-  }, `user:${usuarioId}`)
+    await emitSocketEvent('notificacion', {
+      type: tipo,
+      notificacion: {
+        id: notificacion.id,
+        tipo: notificacion.tipo,
+        mensaje: notificacion.mensaje,
+        leido: notificacion.leido,
+        fecha: notificacion.fecha.toISOString(),
+        ticket: notificacion.ticket,
+      },
+    }, `user:${usuarioId}`)
+  } catch (err) {
+    console.error('Error al crear notificación:', err)
+  }
 }
 
 export async function emitTicketUpdate(ticket: any, action: string, actorId?: string) {
