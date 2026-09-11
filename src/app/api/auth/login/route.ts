@@ -28,6 +28,13 @@ export async function POST(request: Request) {
       )
     }
 
+    if (user.activo === false) {
+      return NextResponse.json(
+        { error: 'Credenciales inválidas' },
+        { status: 401 }
+      )
+    }
+
     if (user.password) {
       const { compare } = await import('bcryptjs')
       const isValid = await compare(password, user.password)

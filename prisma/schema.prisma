@@ -32,6 +32,7 @@ model Usuario {
   departamentoId String?  @db.Uuid
   rolId          String   @db.Uuid
   fechaRegistro  DateTime @default(now())
+  activo         Boolean  @default(true)
 
   departamento Departamento? @relation(fields: [departamentoId], references: [id])
   rol          Rol           @relation(fields: [rolId], references: [id])

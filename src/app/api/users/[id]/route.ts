@@ -80,7 +80,9 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     if (!hasPermission(session, 'users.delete')) return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
 
     const { id } = await params
-    await prisma.usuario.delete({ where: { id } })
+    // Soft delete: se desactiva el usuario para no romper el historial de tickets,
+    // comentarios y logs que referencian su id.
+    await prisma.usuario.update({ where: { id }, data: { activo: false } })
 
     return NextResponse.json({ success: true })
   } catch {

@@ -9,6 +9,7 @@ export async function GET() {
     if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
     const usuarios = await prisma.usuario.findMany({
+      where: { activo: true },
       orderBy: { fechaRegistro: 'desc' },
       include: {
         rol: { select: { id: true, nombre: true } },
