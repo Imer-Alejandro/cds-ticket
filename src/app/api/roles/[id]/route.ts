@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
-import { hasPermission } from '@/lib/permissions'
+import { hasPermission, sanitizePermissions } from '@/lib/permissions'
+import { invalidateRolePermissions } from '@/lib/role-permissions'
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -14,9 +15,13 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const updated = await prisma.rol.update({
       where: { id },
-      data: { nombre: data.nombre, permisos: data.permisos },
+      data: {
+        nombre: data.nombre,
+        ...(data.permisos !== undefined ? { permisos: sanitizePermissions(data.permisos) } : {}),
+      },
     })
 
+    invalidateRolePermissions(id)
     return NextResponse.json(updated)
   } catch {
     return NextResponse.json({ error: 'Error al actualizar rol' }, { status: 500 })
@@ -36,6 +41,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     }
 
     await prisma.rol.delete({ where: { id } })
+    invalidateRolePermissions(id)
     return NextResponse.json({ success: true })
   } catch {
     return NextResponse.json({ error: 'Error al eliminar rol' }, { status: 500 })

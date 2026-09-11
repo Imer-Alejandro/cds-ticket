@@ -21,21 +21,26 @@ import {
   Mail,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ALL_PERMISSIONS } from "@/lib/permissions"
 import { useAuthStore } from "@/store/useAuthStore"
 import { usePermissions } from "@/hooks/usePermissions"
 import { Button } from "../ui/button"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 
+const settingsViewPerms = ALL_PERMISSIONS.filter(
+  (p) => p.key.startsWith("settings.") && p.key.endsWith(".view")
+).map((p) => p.key)
+
 const mainNav = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, perm: "dashboard.view" },
   { name: "Tickets", href: "/tickets", icon: TicketIcon, perm: null },
-  { name: "Notificaciones", href: "/dashboard/notifications", icon: Bell, perm: "notifications.view" },
+  { name: "Notificaciones", href: "/dashboard/notifications", icon: Bell, perm: null },
   { name: "Usuarios", href: "/dashboard/users", icon: Users, perm: "users.view" },
 ]
 
 const settingsItems = [
-  { name: "General", href: "/dashboard/settings", icon: Settings, perm: "settings.view" },
+  { name: "General", href: "/dashboard/settings", icon: Settings, perm: null },
   { name: "Departamentos", href: "/dashboard/settings/departments", icon: Building2, perm: "settings.departments.view" },
   { name: "Categorías", href: "/dashboard/settings/categories", icon: Folders, perm: "settings.categories.view" },
   { name: "Etiquetas", href: "/dashboard/settings/labels", icon: Tags, perm: "settings.labels.view" },
@@ -50,7 +55,7 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuthStore()
-  const { hasPermission } = usePermissions()
+  const { hasPermission, hasAnyPermission } = usePermissions()
   const [settingsOpen, setSettingsOpen] = useState(pathname.startsWith("/dashboard/settings"))
 
   const handleLogout = async () => {
@@ -64,7 +69,9 @@ export function Sidebar() {
   }
 
   const filteredMainNav = mainNav.filter((item) => !item.perm || hasPermission(item.perm))
-  const filteredSettingsItems = settingsItems.filter((item) => !item.perm || hasPermission(item.perm))
+  const filteredSettingsItems = settingsItems.filter(
+    (item) => item.href === "/dashboard/settings" ? hasAnyPermission(settingsViewPerms) : !item.perm || hasPermission(item.perm)
+  )
   const showSettings = filteredSettingsItems.length > 0
 
   return (

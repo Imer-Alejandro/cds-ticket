@@ -15,6 +15,8 @@ import { EstadoBadge, PrioridadBadge } from "@/components/tickets/badges"
 import { SlaBar } from "@/components/tickets/SlaBar"
 import { KanbanBoard, KanbanToggle, type KanbanTicket } from "@/components/tickets/KanbanBoard"
 import { EmptyState } from "@/components/ui/empty-state"
+import { usePermissions } from "@/hooks/usePermissions"
+import { etiquetaEstado } from "@/lib/tickets"
 
 interface Ticket {
   id: string; codigo: string; asunto: string; estado: string; nivelPrioridad: string
@@ -38,6 +40,17 @@ const PRIORIDADES = ["", "CRITICA", "ALTA", "MEDIA", "BAJA"]
 
 const ESTADO_LABEL: Record<string, string> = {
   ABIERTOS: "Abiertos (Todos)", NUEVO: "Nuevo", ASIGNADO: "Asignado", EN_PROGRESO: "En Progreso", PENDIENTE: "Pendiente", RESUELTO: "Resuelto", CERRADO: "Cerrado", ELIMINADO: "Eliminado",
+}
+
+// Transiciones de estado permitidas por estado actual (acción rápida en listado).
+const TRANSICIONES: Record<string, string[]> = {
+  NUEVO: ["ASIGNADO", "EN_PROGRESO", "PENDIENTE", "RESUELTO", "CERRADO", "ELIMINADO"],
+  ASIGNADO: ["EN_PROGRESO", "PENDIENTE", "RESUELTO", "CERRADO", "ELIMINADO"],
+  EN_PROGRESO: ["PENDIENTE", "RESUELTO", "CERRADO", "ELIMINADO"],
+  PENDIENTE: ["EN_PROGRESO", "RESUELTO", "CERRADO", "ELIMINADO"],
+  RESUELTO: ["CERRADO", "ELIMINADO"],
+  CERRADO: [],
+  ELIMINADO: [],
 }
 
 type VistaFilter = "todos" | "mios" | "sinAsignar"
@@ -73,6 +86,9 @@ function TicketsContent() {
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const [fetchTick, setFetchTick] = useState(0)
   const [view, setView] = useState<"table" | "kanban">("table")
+  const [changingId, setChangingId] = useState<string | null>(null)
+  const { hasPermission } = usePermissions()
+  const puedeCambiarEstado = hasPermission("tickets.changeStatus")
 
   useEffect(() => {
     const st = searchParams.get("estado")
@@ -145,6 +161,21 @@ function TicketsContent() {
 
   const clearFilters = () => {
     setSearch(""); setEstadoFilter(""); setPrioridadFilter(""); setVista("todos"); setPage(1)
+  }
+
+  const handleChangeEstado = async (ticketId: string, nuevoEstado: string) => {
+    if (!nuevoEstado) return
+    setChangingId(ticketId)
+    try {
+      const res = await apiFetch(`/api/tickets/${ticketId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ estado: nuevoEstado }),
+      })
+      if (res.ok) refetch()
+    } catch { /* ignore */ } finally {
+      setChangingId(null)
+    }
   }
 
   const vistaButton = (v: VistaFilter, label: string, count: number, icon?: React.ReactNode) => (
@@ -265,15 +296,16 @@ function TicketsContent() {
                 <Th className="text-center">Prioridad</Th>
                 <Th>Asignado</Th>
                 <Th>Resolución SLA</Th>
+                {puedeCambiarEstado && <Th className="text-right">Acciones</Th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} className="text-center py-20 text-muted-foreground">
+                <tr><td colSpan={puedeCambiarEstado ? 8 : 7} className="text-center py-20 text-muted-foreground">
                   <div className="flex items-center justify-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Cargando tickets...</div>
                 </td></tr>
               ) : tickets.length === 0 ? (
-                <tr><td colSpan={7}>
+                <tr><td colSpan={puedeCambiarEstado ? 8 : 7}>
                   <EmptyState title="No hay tickets"
                     subtitle={vista === "mios" ? "Aún no tienes tickets asignados" : vista === "sinAsignar" ? "No hay tickets sin asignar" : "Crea tu primer ticket para comenzar"}
                     action={<Link href="/tickets/new"><Button variant="outline" size="sm" className="rounded-xl mt-1">Crear primer ticket</Button></Link>} />
@@ -319,6 +351,32 @@ function TicketsContent() {
                         : (<span className="text-xs text-muted-foreground">Sin SLA</span>)
                       }
                     </td>
+                    {puedeCambiarEstado && (
+                      <td className="px-4 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                        {TRANSICIONES[t.estado]?.length ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {changingId === t.id && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                            <select
+                              value=""
+                              disabled={changingId === t.id}
+                              onChange={(e) => handleChangeEstado(t.id, e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              key={`${t.id}-${t.estado}`}
+                              className="h-8 rounded-lg border border-border bg-transparent px-2 text-xs cursor-pointer focus:outline-none focus-visible:ring-0 max-w-[130px]"
+                              title={`Cambiar estado (actual: ${etiquetaEstado(t.estado)})`}
+                            >
+                              <option value="" disabled>{etiquetaEstado(t.estado)}...</option>
+                              {TRANSICIONES[t.estado].map((dest) => (
+                                <option key={dest} value={dest}>{etiquetaEstado(dest)}</option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))
               )}

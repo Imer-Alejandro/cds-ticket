@@ -148,7 +148,7 @@ export default function TicketDetailPage() {
     if (!params.id) return
     Promise.all([
       fetch(`/api/tickets/${params.id}`).then(r => r.ok ? r.json() : null),
-      fetch("/api/users").then(r => r.ok ? r.json() : []),
+      fetch("/api/users/agents").then(r => r.ok ? r.json() : []),
     ]).then(([t, a]) => { setTicket(t); setAgents(a || []) }).finally(() => setLoading(false))
   }, [params.id])
 

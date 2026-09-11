@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { hasPermission } from '@/lib/permissions'
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+    if (!hasPermission(session, 'templates.edit')) return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
 
     const { id } = await params
     const data = await request.json()
@@ -28,6 +30,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+    if (!hasPermission(session, 'templates.delete')) return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
 
     const { id } = await params
     await prisma.plantillaRespuesta.delete({ where: { id } })

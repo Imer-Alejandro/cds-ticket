@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
-import { hasPermission } from '@/lib/permissions'
+import { hasPermission, hasAnyPermission, USERS_LIST_PERMISSIONS } from '@/lib/permissions'
 
 export async function GET() {
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+    if (!hasAnyPermission(session, USERS_LIST_PERMISSIONS)) return NextResponse.json({ error: 'Permisos insuficientes' }, { status: 403 })
 
     const usuarios = await prisma.usuario.findMany({
       where: { activo: true },

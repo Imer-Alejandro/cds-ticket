@@ -1,48 +1,14 @@
-import { JWTPayload } from 'jose'
+import type { JWTPayload } from 'jose'
 
-// ── Permission definition types ──────────────────────────────────────────────
+// ── Fuente única de verdad ───────────────────────────────────────────────────
+// El árbol de permisos se declara UNA sola vez. De él se derivan el tipo
+// `Permissions`, `ALL_PERMISSIONS`, `PERMISSION_GROUPS`, `buildEmptyPermissions()`
+// y los defaults por rol, eliminando la duplicación manual entre estructuras.
 
-export interface ModulePermissions {
-  view: boolean
-  create?: boolean
-  edit?: boolean
-  delete?: boolean
+export interface PermissionMeta {
+  label: string
+  group: string
 }
-
-export interface TicketsPermissions {
-  viewAll: boolean
-  viewAssigned: boolean
-  viewOwn: boolean
-  create: boolean
-  edit: boolean
-  assign: boolean
-  changeStatus: boolean
-  delete: boolean
-  viewInternalComments: boolean
-}
-
-export interface SettingsPermissions {
-  view: boolean
-  departments: ModulePermissions
-  categories: ModulePermissions
-  labels: ModulePermissions
-  roles: ModulePermissions
-  teams: ModulePermissions
-  queues: ModulePermissions
-  sla: ModulePermissions
-  email: { view: boolean; edit: boolean }
-}
-
-export interface Permissions {
-  all?: boolean
-  dashboard: { view: boolean }
-  tickets: TicketsPermissions
-  notifications: { view: boolean }
-  users: ModulePermissions
-  settings: SettingsPermissions
-}
-
-// ── All available permissions (for the matrix UI) ────────────────────────────
 
 export interface PermissionDef {
   key: string
@@ -50,171 +16,168 @@ export interface PermissionDef {
   group: string
 }
 
-export const ALL_PERMISSIONS: PermissionDef[] = [
-  // Dashboard
-  { key: 'dashboard.view', label: 'Ver Dashboard', group: 'Dashboard' },
-
-  // Tickets
-  { key: 'tickets.viewAll', label: 'Ver todos los tickets', group: 'Tickets' },
-  { key: 'tickets.viewAssigned', label: 'Ver tickets asignados', group: 'Tickets' },
-  { key: 'tickets.viewOwn', label: 'Ver tickets propios', group: 'Tickets' },
-  { key: 'tickets.create', label: 'Crear tickets', group: 'Tickets' },
-  { key: 'tickets.edit', label: 'Editar tickets', group: 'Tickets' },
-  { key: 'tickets.assign', label: 'Asignar tickets', group: 'Tickets' },
-  { key: 'tickets.changeStatus', label: 'Cambiar estado', group: 'Tickets' },
-  { key: 'tickets.delete', label: 'Eliminar tickets', group: 'Tickets' },
-  { key: 'tickets.viewInternalComments', label: 'Ver comentarios internos', group: 'Tickets' },
-
-  // Notifications
-  { key: 'notifications.view', label: 'Ver notificaciones', group: 'Notificaciones' },
-
-  // Users
-  { key: 'users.view', label: 'Ver usuarios', group: 'Usuarios' },
-  { key: 'users.create', label: 'Crear usuarios', group: 'Usuarios' },
-  { key: 'users.edit', label: 'Editar usuarios', group: 'Usuarios' },
-  { key: 'users.delete', label: 'Eliminar usuarios', group: 'Usuarios' },
-
-  // Settings
-  { key: 'settings.view', label: 'Ver configuración', group: 'Configuración' },
-  { key: 'settings.departments.view', label: 'Ver departamentos', group: 'Configuración > Departamentos' },
-  { key: 'settings.departments.create', label: 'Crear departamentos', group: 'Configuración > Departamentos' },
-  { key: 'settings.departments.edit', label: 'Editar departamentos', group: 'Configuración > Departamentos' },
-  { key: 'settings.departments.delete', label: 'Eliminar departamentos', group: 'Configuración > Departamentos' },
-  { key: 'settings.categories.view', label: 'Ver categorías', group: 'Configuración > Categorías' },
-  { key: 'settings.categories.create', label: 'Crear categorías', group: 'Configuración > Categorías' },
-  { key: 'settings.categories.edit', label: 'Editar categorías', group: 'Configuración > Categorías' },
-  { key: 'settings.categories.delete', label: 'Eliminar categorías', group: 'Configuración > Categorías' },
-  { key: 'settings.labels.view', label: 'Ver etiquetas', group: 'Configuración > Etiquetas' },
-  { key: 'settings.labels.create', label: 'Crear etiquetas', group: 'Configuración > Etiquetas' },
-  { key: 'settings.labels.edit', label: 'Editar etiquetas', group: 'Configuración > Etiquetas' },
-  { key: 'settings.labels.delete', label: 'Eliminar etiquetas', group: 'Configuración > Etiquetas' },
-  { key: 'settings.roles.view', label: 'Ver roles', group: 'Configuración > Roles' },
-  { key: 'settings.roles.create', label: 'Crear roles', group: 'Configuración > Roles' },
-  { key: 'settings.roles.edit', label: 'Editar roles', group: 'Configuración > Roles' },
-  { key: 'settings.roles.delete', label: 'Eliminar roles', group: 'Configuración > Roles' },
-  { key: 'settings.teams.view', label: 'Ver equipos', group: 'Configuración > Equipos' },
-  { key: 'settings.teams.create', label: 'Crear equipos', group: 'Configuración > Equipos' },
-  { key: 'settings.teams.edit', label: 'Editar equipos', group: 'Configuración > Equipos' },
-  { key: 'settings.teams.delete', label: 'Eliminar equipos', group: 'Configuración > Equipos' },
-  { key: 'settings.queues.view', label: 'Ver colas', group: 'Configuración > Colas' },
-  { key: 'settings.queues.create', label: 'Crear colas', group: 'Configuración > Colas' },
-  { key: 'settings.queues.edit', label: 'Editar colas', group: 'Configuración > Colas' },
-  { key: 'settings.queues.delete', label: 'Eliminar colas', group: 'Configuración > Colas' },
-  { key: 'settings.sla.view', label: 'Ver SLAs', group: 'Configuración > SLAs' },
-  { key: 'settings.sla.create', label: 'Crear SLAs', group: 'Configuración > SLAs' },
-  { key: 'settings.sla.edit', label: 'Editar SLAs', group: 'Configuración > SLAs' },
-  { key: 'settings.sla.delete', label: 'Eliminar SLAs', group: 'Configuración > SLAs' },
-  { key: 'settings.email.view', label: 'Ver correo', group: 'Configuración > Correo' },
-  { key: 'settings.email.edit', label: 'Configurar correo', group: 'Configuración > Correo' },
-]
-
-// ── Permission groups for UI rendering ───────────────────────────────────────
-
-export const PERMISSION_GROUPS = [
-  'Dashboard',
-  'Tickets',
-  'Notificaciones',
-  'Usuarios',
-  'Configuración',
-  'Configuración > Departamentos',
-  'Configuración > Categorías',
-  'Configuración > Etiquetas',
-  'Configuración > Roles',
-  'Configuración > Equipos',
-  'Configuración > Colas',
-  'Configuración > SLAs',
-  'Configuración > Correo',
-]
-
-// ── Default permissions per role ─────────────────────────────────────────────
-
-export const DEFAULT_PERMISSIONS: Record<string, Permissions> = {
-  Administrador: {
-    all: true,
-    dashboard: { view: true },
-    tickets: {
-      viewAll: true, viewAssigned: true, viewOwn: true,
-      create: true, edit: true, assign: true, changeStatus: true,
-      delete: true, viewInternalComments: true,
-    },
-    notifications: { view: true },
-    users: { view: true, create: true, edit: true, delete: true },
-    settings: {
-      view: true,
-      departments: { view: true, create: true, edit: true, delete: true },
-      categories: { view: true, create: true, edit: true, delete: true },
-      labels: { view: true, create: true, edit: true, delete: true },
-      roles: { view: true, create: true, edit: true, delete: true },
-      teams: { view: true, create: true, edit: true, delete: true },
-      queues: { view: true, create: true, edit: true, delete: true },
-      sla: { view: true, create: true, edit: true, delete: true },
-      email: { view: true, edit: true },
-    },
-  },
-  Supervisor: {
-    dashboard: { view: true },
-    tickets: {
-      viewAll: true, viewAssigned: true, viewOwn: true,
-      create: true, edit: true, assign: true, changeStatus: true,
-      delete: false, viewInternalComments: true,
-    },
-    notifications: { view: true },
-    users: { view: true, create: false, edit: false, delete: false },
-    settings: {
-      view: true,
-      departments: { view: true, create: true, edit: true, delete: false },
-      categories: { view: true, create: false, edit: false, delete: false },
-      labels: { view: true, create: false, edit: false, delete: false },
-      roles: { view: true, create: false, edit: false, delete: false },
-      teams: { view: true, create: true, edit: true, delete: false },
-      queues: { view: true, create: false, edit: false, delete: false },
-      sla: { view: true, create: false, edit: false, delete: false },
-      email: { view: true, edit: false },
-    },
-  },
-  Agente: {
-    dashboard: { view: false },
-    tickets: {
-      viewAll: false, viewAssigned: true, viewOwn: true,
-      create: true, edit: true, assign: false, changeStatus: true,
-      delete: false, viewInternalComments: true,
-    },
-    notifications: { view: true },
-    users: { view: false, create: false, edit: false, delete: false },
-    settings: {
-      view: false,
-      departments: { view: false, create: false, edit: false, delete: false },
-      categories: { view: false, create: false, edit: false, delete: false },
-      labels: { view: false, create: false, edit: false, delete: false },
-      roles: { view: false, create: false, edit: false, delete: false },
-      teams: { view: false, create: false, edit: false, delete: false },
-      queues: { view: false, create: false, edit: false, delete: false },
-      sla: { view: false, create: false, edit: false, delete: false },
-      email: { view: false, edit: false },
-    },
-  },
-  Usuario: {
-    dashboard: { view: false },
-    tickets: {
-      viewAll: false, viewAssigned: false, viewOwn: true,
-      create: true, edit: false, assign: false, changeStatus: false,
-      delete: false, viewInternalComments: false,
-    },
-    notifications: { view: false },
-    users: { view: false, create: false, edit: false, delete: false },
-    settings: {
-      view: false,
-      departments: { view: false, create: false, edit: false, delete: false },
-      categories: { view: false, create: false, edit: false, delete: false },
-      labels: { view: false, create: false, edit: false, delete: false },
-      roles: { view: false, create: false, edit: false, delete: false },
-      teams: { view: false, create: false, edit: false, delete: false },
-      queues: { view: false, create: false, edit: false, delete: false },
-      sla: { view: false, create: false, edit: false, delete: false },
-      email: { view: false, edit: false },
-    },
-  },
+function perm(label: string, group: string): PermissionMeta {
+  return { label, group }
 }
+
+function modulePerms(group: string, nombre: string) {
+  return {
+    view: perm(`Ver ${nombre}`, group),
+    create: perm(`Crear ${nombre}`, group),
+    edit: perm(`Editar ${nombre}`, group),
+    delete: perm(`Eliminar ${nombre}`, group),
+  }
+}
+
+const PERMISSIONS_TREE = {
+  dashboard: {
+    view: perm('Ver Dashboard', 'Dashboard'),
+  },
+  tickets: {
+    viewAll: perm('Ver todos los tickets', 'Tickets'),
+    viewAssigned: perm('Ver tickets asignados', 'Tickets'),
+    viewOwn: perm('Ver tickets propios', 'Tickets'),
+    create: perm('Crear tickets', 'Tickets'),
+    edit: perm('Editar tickets', 'Tickets'),
+    assign: perm('Asignar tickets', 'Tickets'),
+    changeStatus: perm('Cambiar estado', 'Tickets'),
+    delete: perm('Eliminar tickets', 'Tickets'),
+    viewInternalComments: perm('Ver comentarios internos', 'Tickets'),
+  },
+  users: modulePerms('Usuarios', 'usuarios'),
+  templates: modulePerms('Plantillas', 'plantillas'),
+  reports: {
+    view: perm('Ver reportes', 'Reportes'),
+    export: perm('Exportar reportes', 'Reportes'),
+  },
+  automations: modulePerms('Automatizaciones', 'automatizaciones'),
+  surveys: {
+    view: perm('Ver encuestas', 'Encuestas'),
+  },
+  settings: {
+    departments: modulePerms('Configuración > Departamentos', 'departamentos'),
+    categories: modulePerms('Configuración > Categorías', 'categorías'),
+    labels: modulePerms('Configuración > Etiquetas', 'etiquetas'),
+    roles: modulePerms('Configuración > Roles', 'roles'),
+    teams: modulePerms('Configuración > Equipos', 'equipos'),
+    queues: modulePerms('Configuración > Colas', 'colas'),
+    sla: modulePerms('Configuración > SLAs', 'SLAs'),
+    email: {
+      view: perm('Ver correo', 'Configuración > Correo'),
+      edit: perm('Configurar correo', 'Configuración > Correo'),
+    },
+  },
+} as const
+
+type PermsOf<T> = {
+  [K in keyof T]: T[K] extends { label: string; group: string } ? boolean : PermsOf<T[K]>
+}
+
+export type Permissions = { all?: boolean } & PermsOf<typeof PERMISSIONS_TREE>
+
+function isLeaf(value: unknown): value is PermissionMeta {
+  return typeof value === 'object' && value !== null && 'label' in value && 'group' in value
+}
+
+function flattenMeta(tree: Record<string, unknown>, prefix = ''): PermissionDef[] {
+  const out: PermissionDef[] = []
+  for (const [key, value] of Object.entries(tree)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key
+    if (isLeaf(value)) {
+      out.push({ key: fullKey, label: value.label, group: value.group })
+    } else {
+      out.push(...flattenMeta(value as Record<string, unknown>, fullKey))
+    }
+  }
+  return out
+}
+
+function emptyTree(tree: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(tree)) {
+    out[key] = isLeaf(value) ? false : emptyTree(value as Record<string, unknown>)
+  }
+  return out
+}
+
+// ── Derivan del árbol único ──────────────────────────────────────────────────
+
+export const ALL_PERMISSIONS: PermissionDef[] = flattenMeta(
+  PERMISSIONS_TREE as unknown as Record<string, unknown>
+)
+
+export const PERMISSION_GROUPS: string[] = [...new Set(ALL_PERMISSIONS.map((p) => p.group))]
+
+export const ALL_PERMISSION_KEYS: Set<string> = new Set(ALL_PERMISSIONS.map((p) => p.key))
+
+// ── Defaults por rol (perfiles base, validados contra el árbol) ──────────────
+
+/** Cualquiera de estos permisos habilita listar usuarios (gestión o equipos). */
+export const USERS_LIST_PERMISSIONS: string[] = [
+  'users.view',
+  'users.create',
+  'users.edit',
+  'users.delete',
+  'settings.teams.view',
+  'settings.teams.create',
+  'settings.teams.edit',
+  'settings.teams.delete',
+]
+
+const DEFAULT_PERMISSION_KEYS: Record<string, string[]> = {
+  Administrador: ['__all__'],
+  Supervisor: [
+    'dashboard.view',
+    'tickets.viewAll',
+    'tickets.viewAssigned',
+    'tickets.viewOwn',
+    'tickets.create',
+    'tickets.edit',
+    'tickets.assign',
+    'tickets.changeStatus',
+    'tickets.viewInternalComments',
+    'users.view',
+    'templates.view',
+    'templates.create',
+    'templates.edit',
+    'reports.view',
+    'reports.export',
+    'automations.view',
+    'surveys.view',
+    'settings.departments.view',
+    'settings.departments.create',
+    'settings.departments.edit',
+    'settings.categories.view',
+    'settings.labels.view',
+    'settings.roles.view',
+    'settings.teams.view',
+    'settings.teams.create',
+    'settings.teams.edit',
+    'settings.queues.view',
+    'settings.sla.view',
+    'settings.email.view',
+  ],
+  Agente: [
+    'tickets.viewAssigned',
+    'tickets.viewOwn',
+    'tickets.create',
+    'tickets.edit',
+    'tickets.changeStatus',
+    'tickets.viewInternalComments',
+    'templates.view',
+    'templates.create',
+  ],
+  Usuario: ['tickets.viewOwn', 'tickets.create'],
+}
+
+export const DEFAULT_PERMISSIONS: Record<string, Permissions> = Object.fromEntries(
+  Object.entries(DEFAULT_PERMISSION_KEYS).map(([nombre, keys]) => [
+    nombre,
+    keys.includes('__all__')
+      ? ({ all: true } as Permissions)
+      : unflattenPermissions(keys),
+  ])
+)
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -223,27 +186,32 @@ export function getDefaultPermissions(roleName: string): Permissions {
 }
 
 export function buildEmptyPermissions(): Permissions {
-  return {
-    dashboard: { view: false },
-    tickets: {
-      viewAll: false, viewAssigned: false, viewOwn: false,
-      create: false, edit: false, assign: false, changeStatus: false,
-      delete: false, viewInternalComments: false,
-    },
-    notifications: { view: false },
-    users: { view: false, create: false, edit: false, delete: false },
-    settings: {
-      view: false,
-      departments: { view: false, create: false, edit: false, delete: false },
-      categories: { view: false, create: false, edit: false, delete: false },
-      labels: { view: false, create: false, edit: false, delete: false },
-      roles: { view: false, create: false, edit: false, delete: false },
-      teams: { view: false, create: false, edit: false, delete: false },
-      queues: { view: false, create: false, edit: false, delete: false },
-      sla: { view: false, create: false, edit: false, delete: false },
-      email: { view: false, edit: false },
-    },
+  return emptyTree(PERMISSIONS_TREE as unknown as Record<string, unknown>) as Permissions
+}
+
+/**
+ * Filtra un objeto de permisos recibido del cliente dejando únicamente claves
+ * conocidas (o `all: true`). Previene guardar permisos arbitrarios en BD.
+ */
+export function sanitizePermissions(input: unknown): Permissions {
+  if (
+    input &&
+    typeof input === 'object' &&
+    (input as Record<string, unknown>).all === true
+  ) {
+    return { all: true } as Permissions
   }
+  const keys: string[] = []
+  const collect = (current: unknown, prefix = '') => {
+    if (!current || typeof current !== 'object') return
+    for (const [key, value] of Object.entries(current as Record<string, unknown>)) {
+      const path = prefix ? `${prefix}.${key}` : key
+      if (value === true && ALL_PERMISSION_KEYS.has(path)) keys.push(path)
+      else if (value && typeof value === 'object') collect(value, path)
+    }
+  }
+  collect(input)
+  return unflattenPermissions([...new Set(keys)])
 }
 
 /**

@@ -18,8 +18,11 @@ interface Rol { id: string; nombre: string; permisos: Record<string, unknown>; _
 const GROUP_ICONS: Record<string, string> = {
   Dashboard: "📊",
   Tickets: "🎫",
-  Notificaciones: "🔔",
   Usuarios: "👥",
+  Plantillas: "📄",
+  Reportes: "📈",
+  Automatizaciones: "⚡",
+  Encuestas: "📝",
   "Configuración": "⚙️",
   "Configuración > Departamentos": "🏢",
   "Configuración > Categorías": "📁",
