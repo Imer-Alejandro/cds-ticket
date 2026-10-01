@@ -2,8 +2,8 @@ import type { EmailConfig } from './config'
 
 export const MICROSOFT_SCOPES = [
   'offline_access',
-  'https://outlook.office365.com/IMAP.AccessAsUser.All',
-  'https://outlook.office365.com/SMTP.Send',
+  'https://outlook.office.com/IMAP.AccessAsUser.All',
+  'https://outlook.office.com/SMTP.Send',
 ].join(' ')
 
 function authority(config: Pick<EmailConfig, 'tenantId'>) {
