@@ -238,9 +238,10 @@ function ConfigurationGuide() {
         <div>
           <h4 className="font-medium mb-1">Para Microsoft 365:</h4>
           <ul className="list-disc list-inside space-y-1 text-muted-foreground text-xs">
-            <li>IMAP Host: <code className="bg-white px-1 rounded">imap.outlook.com</code></li>
-            <li>SMTP Host: <code className="bg-white px-1 rounded">smtp-mail.outlook.com</code></li>
-            <li>Puerto SMTP: 587 (SSL directo deshabilitado, STARTTLS automático)</li>
+            <li>Autenticación IMAP: Microsoft 365 OAuth2; el usuario y contraseña puede estar deshabilitado por Microsoft.</li>
+            <li>IMAP: <code className="bg-white px-1 rounded">outlook.office365.com</code>, puerto 993, SSL/TLS activado.</li>
+            <li>SMTP: <code className="bg-white px-1 rounded">smtp.office365.com</code>, puerto 587, SSL directo deshabilitado (STARTTLS).</li>
+            <li>La aplicación de Entra ID necesita permisos delegados IMAP.AccessAsUser.All y SMTP.Send.</li>
           </ul>
         </div>
         <div className="pt-2 border-t border-blue-200">
