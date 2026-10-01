@@ -19,7 +19,10 @@ function authority(config: Pick<EmailConfig, 'tenantId'>) {
 }
 
 export function microsoftRedirectUri(origin: string) {
-  const configuredOrigin = process.env.APP_URL?.replace(/\/$/, '') || origin.replace(/\/$/, '')
+  const requestOrigin = origin.replace(/\/$/, '')
+  const configuredOrigin = process.env.NODE_ENV === 'production'
+    ? process.env.APP_URL?.replace(/\/$/, '') || requestOrigin
+    : requestOrigin
   return `${configuredOrigin}/api/settings/email/oauth/callback`
 }
 

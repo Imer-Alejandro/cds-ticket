@@ -38,7 +38,13 @@ export async function GET(request: NextRequest) {
     if (!tokens.refresh_token) throw new Error('Microsoft no devolvió refresh_token; revisa el permiso offline_access')
     if (!tokens.id_token) throw new Error('Microsoft no devolvió la identidad de la cuenta autorizada')
     const oauthMailbox = await verifyMicrosoftMailbox(tokens.id_token, config, config.imapUser, nonce)
-    await saveEmailConfig({ authMode: 'oauth2', refreshToken: tokens.refresh_token, oauthMailbox })
+    const sameMailbox = config.oauthMailbox.trim().toLowerCase() === oauthMailbox
+    await saveEmailConfig({
+      authMode: 'oauth2',
+      refreshToken: tokens.refresh_token,
+      oauthMailbox,
+      monitorAfter: sameMailbox && config.monitorAfter ? config.monitorAfter : new Date().toISOString(),
+    })
     const response = settingsRedirect(request, 'connected')
     response.cookies.delete('email_oauth_state')
     response.cookies.delete('email_oauth_nonce')

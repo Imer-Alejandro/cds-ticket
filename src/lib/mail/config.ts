@@ -8,6 +8,7 @@ export interface EmailConfig {
   clientSecret: string
   refreshToken: string
   oauthMailbox: string
+  monitorAfter: string
   enabled: boolean
   imapHost: string
   imapPort: number
@@ -33,6 +34,7 @@ const DEFAULTS: EmailConfig = {
   clientSecret: '',
   refreshToken: '',
   oauthMailbox: '',
+  monitorAfter: '',
   enabled: false,
   imapHost: '',
   imapPort: 993,
@@ -52,7 +54,7 @@ const DEFAULTS: EmailConfig = {
 }
 
 const KEYS: (keyof EmailConfig)[] = [
-  'authMode', 'refreshToken', 'oauthMailbox',
+  'authMode', 'refreshToken', 'oauthMailbox', 'monitorAfter',
   'enabled', 'imapHost', 'imapPort', 'imapSecure', 'imapUser', 'imapPass',
   'imapFolder', 'smtpHost', 'smtpPort', 'smtpSecure', 'smtpUser', 'smtpPass',
   'fromAddress', 'fromName', 'checkInterval', 'defaultCategoriaId',

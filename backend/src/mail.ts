@@ -30,6 +30,17 @@ export async function checkMail(cfg?: EmailConfig) {
       return
     }
 
+    if (config.authMode === 'oauth2' && !config.monitorAfter) {
+      config.monitorAfter = new Date().toISOString()
+      await prisma.configuracion.upsert({
+        where: { clave: 'email_monitorAfter' },
+        update: { valor: config.monitorAfter },
+        create: { clave: 'email_monitorAfter', valor: config.monitorAfter, grupo: 'email' },
+      })
+      console.log('[Mail] Punto inicial de monitoreo establecido; el histórico no se importará')
+      return
+    }
+
     const accessToken = config.authMode === 'oauth2' ? await getMicrosoftAccessToken(config) : null
     if (config.authMode !== 'oauth2' && !config.imapPass) return
 
@@ -44,9 +55,30 @@ export async function checkMail(cfg?: EmailConfig) {
     await client.connect()
     const lock = await client.getMailboxLock(config.imapFolder)
     try {
-      const result = await client.search({ seen: false })
-      if (!result) return
-      const msgs = result as number[]
+      const monitorAfter = config.authMode === 'oauth2'
+        ? new Date(config.monitorAfter)
+        : null
+      const candidates = ((await client.search({
+        seen: false,
+        ...(monitorAfter ? { since: monitorAfter } : {}),
+      })) || []) as number[]
+      const metadata = candidates.length
+        ? await client.fetchAll(candidates, { internalDate: true })
+        : []
+      const msgs = metadata
+        .filter(message =>
+          !monitorAfter || (message.internalDate && message.internalDate >= monitorAfter)
+        )
+        .map(message => message.seq)
+      const historicCount = candidates.length - msgs.length
+      if (historicCount) {
+        console.log(`[Mail] ${historicCount} correo(s) histórico(s) sin leer omitido(s)`)
+      }
+      if (!msgs.length) {
+        console.log(`[Mail] Sin correos no leídos en ${config.imapFolder}; siguiente revisión en ${config.checkInterval || 10} segundos`)
+        return
+      }
+      console.log(`[Mail] ${msgs.length} correo(s) no leído(s) encontrado(s) en ${config.imapFolder}`)
 
       const categoriaId = (await resolveEmailCategoriaId(config, prisma)) || undefined
 

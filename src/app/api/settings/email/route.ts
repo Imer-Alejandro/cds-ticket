@@ -11,6 +11,7 @@ export async function GET() {
     }
 
     const config = await loadEmailConfig()
+    delete config.monitorAfter
     const { tenantId, clientId, clientSecret, refreshToken, ...safeConfig } = config
     return NextResponse.json({
       ...safeConfig,
