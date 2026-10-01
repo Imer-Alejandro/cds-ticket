@@ -1,4 +1,5 @@
 import prisma from '@/lib/prisma'
+import { getMicrosoftOAuthEnvironment, hasMicrosoftOAuthEnvironment } from './env'
 
 export interface EmailConfig {
   authMode: 'password' | 'oauth2'
@@ -6,6 +7,7 @@ export interface EmailConfig {
   clientId: string
   clientSecret: string
   refreshToken: string
+  oauthMailbox: string
   enabled: boolean
   imapHost: string
   imapPort: number
@@ -26,10 +28,11 @@ export interface EmailConfig {
 
 const DEFAULTS: EmailConfig = {
   authMode: 'password',
-  tenantId: 'common',
+  tenantId: '',
   clientId: '',
   clientSecret: '',
   refreshToken: '',
+  oauthMailbox: '',
   enabled: false,
   imapHost: '',
   imapPort: 993,
@@ -49,7 +52,7 @@ const DEFAULTS: EmailConfig = {
 }
 
 const KEYS: (keyof EmailConfig)[] = [
-  'authMode', 'tenantId', 'clientId', 'clientSecret', 'refreshToken',
+  'authMode', 'refreshToken', 'oauthMailbox',
   'enabled', 'imapHost', 'imapPort', 'imapSecure', 'imapUser', 'imapPass',
   'imapFolder', 'smtpHost', 'smtpPort', 'smtpSecure', 'smtpUser', 'smtpPass',
   'fromAddress', 'fromName', 'checkInterval', 'defaultCategoriaId',
@@ -65,19 +68,33 @@ export async function loadEmailConfig(): Promise<EmailConfig> {
     const v = map.get(`email_${key}`)
     if (v !== undefined) {
       const d = DEFAULTS[key]
-      if (typeof d === 'boolean') (cfg as any)[key] = v === 'true'
-      else if (typeof d === 'number') (cfg as any)[key] = parseInt(v, 10) || 0
-      else (cfg as any)[key] = v
+      const value = typeof d === 'boolean'
+        ? v === 'true'
+        : typeof d === 'number'
+          ? parseInt(v, 10) || 0
+          : v
+      Object.assign(cfg, { [key]: value })
     }
+  }
+  Object.assign(cfg, getMicrosoftOAuthEnvironment())
+
+  const legacyCredentialKeys = ['email_tenantId', 'email_clientId', 'email_clientSecret']
+  if (
+    hasMicrosoftOAuthEnvironment(cfg) &&
+    rows.some(row => legacyCredentialKeys.includes(row.clave))
+  ) {
+    await prisma.configuracion.deleteMany({
+      where: { grupo: 'email', clave: { in: legacyCredentialKeys } },
+    })
   }
   return cfg
 }
 
 export async function saveEmailConfig(cfg: Partial<EmailConfig>) {
-  const secretKeys: (keyof EmailConfig)[] = ['imapPass', 'smtpPass', 'clientSecret', 'refreshToken']
+  const secretKeys: (keyof EmailConfig)[] = ['imapPass', 'smtpPass', 'refreshToken']
   const ops = KEYS.filter(k => k in cfg && !(secretKeys.includes(k) && cfg[k] === '')).map(k => ({
     clave: `email_${k}`,
-    valor: String((cfg as any)[k]),
+    valor: String(cfg[k]),
     grupo: 'email',
   }))
   for (const op of ops) {

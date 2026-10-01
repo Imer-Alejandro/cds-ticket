@@ -11,14 +11,13 @@ export async function GET() {
     }
 
     const config = await loadEmailConfig()
+    const { tenantId, clientId, clientSecret, refreshToken, ...safeConfig } = config
     return NextResponse.json({
-      ...config,
+      ...safeConfig,
       imapPass: '',
       smtpPass: '',
-      clientSecret: '',
-      refreshToken: '',
-      hasClientSecret: Boolean(config.clientSecret),
-      hasRefreshToken: Boolean(config.refreshToken),
+      oauthConfigured: Boolean(tenantId && clientId && clientSecret),
+      hasRefreshToken: Boolean(refreshToken),
     })
   } catch (error) {
     console.error('Error loading email config:', error)

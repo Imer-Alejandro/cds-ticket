@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { hasPermission } from '@/lib/permissions'
 import { loadEmailConfig, saveEmailConfig } from '@/lib/mail/config'
-import { exchangeMicrosoftCode, microsoftRedirectUri } from '@/lib/mail/oauth'
+import { exchangeMicrosoftCode, microsoftRedirectUri, verifyMicrosoftMailbox } from '@/lib/mail/oauth'
 
 function settingsRedirect(request: NextRequest, result: 'connected' | 'error', message?: string) {
   const url = new URL('/dashboard/settings/email', request.url)
@@ -19,7 +19,8 @@ export async function GET(request: NextRequest) {
 
   const state = request.nextUrl.searchParams.get('state')
   const storedState = request.cookies.get('email_oauth_state')?.value
-  if (!state || !storedState || state !== storedState) {
+  const nonce = request.cookies.get('email_oauth_nonce')?.value
+  if (!state || !storedState || state !== storedState || !nonce) {
     return settingsRedirect(request, 'error', 'Estado OAuth inválido o expirado')
   }
 
@@ -35,9 +36,12 @@ export async function GET(request: NextRequest) {
       microsoftRedirectUri(new URL(request.url).origin),
     )
     if (!tokens.refresh_token) throw new Error('Microsoft no devolvió refresh_token; revisa el permiso offline_access')
-    await saveEmailConfig({ authMode: 'oauth2', refreshToken: tokens.refresh_token })
+    if (!tokens.id_token) throw new Error('Microsoft no devolvió la identidad de la cuenta autorizada')
+    const oauthMailbox = await verifyMicrosoftMailbox(tokens.id_token, config, config.imapUser, nonce)
+    await saveEmailConfig({ authMode: 'oauth2', refreshToken: tokens.refresh_token, oauthMailbox })
     const response = settingsRedirect(request, 'connected')
     response.cookies.delete('email_oauth_state')
+    response.cookies.delete('email_oauth_nonce')
     return response
   } catch (error) {
     return settingsRedirect(request, 'error', error instanceof Error ? error.message : 'No se pudo conectar Microsoft 365')

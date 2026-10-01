@@ -1,10 +1,18 @@
 import type { EmailConfig } from './config'
+import { createRemoteJWKSet, jwtVerify } from 'jose'
 
 export const MICROSOFT_SCOPES = [
+  'openid',
+  'profile',
+  'email',
   'offline_access',
   'https://outlook.office.com/IMAP.AccessAsUser.All',
   'https://outlook.office.com/SMTP.Send',
 ].join(' ')
+
+const microsoftJwks = createRemoteJWKSet(
+  new URL('https://login.microsoftonline.com/common/discovery/v2.0/keys')
+)
 
 function authority(config: Pick<EmailConfig, 'tenantId'>) {
   return `https://login.microsoftonline.com/${encodeURIComponent(config.tenantId || 'common')}/oauth2/v2.0`
@@ -15,7 +23,13 @@ export function microsoftRedirectUri(origin: string) {
   return `${configuredOrigin}/api/settings/email/oauth/callback`
 }
 
-export function microsoftAuthorizationUrl(config: Pick<EmailConfig, 'tenantId' | 'clientId'>, redirectUri: string, state: string) {
+export function microsoftAuthorizationUrl(
+  config: Pick<EmailConfig, 'tenantId' | 'clientId'>,
+  redirectUri: string,
+  state: string,
+  nonce: string,
+  loginHint: string,
+) {
   const params = new URLSearchParams({
     client_id: config.clientId,
     response_type: 'code',
@@ -23,6 +37,9 @@ export function microsoftAuthorizationUrl(config: Pick<EmailConfig, 'tenantId' |
     response_mode: 'query',
     scope: MICROSOFT_SCOPES,
     state,
+    nonce,
+    login_hint: loginHint,
+    prompt: 'select_account',
   })
   return `${authority(config)}/authorize?${params.toString()}`
 }
@@ -33,7 +50,7 @@ async function tokenRequest(config: Pick<EmailConfig, 'tenantId' | 'clientId' | 
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params,
   })
-  const body = await response.json() as { access_token?: string; refresh_token?: string; error?: string; error_description?: string }
+  const body = await response.json() as { access_token?: string; refresh_token?: string; id_token?: string; error?: string; error_description?: string }
   if (!response.ok || !body.access_token) {
     throw new Error(body.error_description || body.error || 'Microsoft no devolvió un token de acceso')
   }
@@ -51,9 +68,40 @@ export async function exchangeMicrosoftCode(config: Pick<EmailConfig, 'tenantId'
   }))
 }
 
+export async function verifyMicrosoftMailbox(
+  idToken: string,
+  config: Pick<EmailConfig, 'tenantId' | 'clientId'>,
+  expectedMailbox: string,
+  nonce: string,
+) {
+  const { payload } = await jwtVerify(idToken, microsoftJwks, {
+    audience: config.clientId,
+  })
+  if (payload.nonce !== nonce) throw new Error('El nonce de la autorización Microsoft no coincide')
+
+  const tenantId = String(payload.tid || '').toLowerCase()
+  const issuer = String(payload.iss || '').toLowerCase()
+  if (
+    !tenantId ||
+    tenantId !== config.tenantId.toLowerCase() ||
+    issuer !== `https://login.microsoftonline.com/${tenantId}/v2.0`
+  ) {
+    throw new Error('La cuenta autorizada no pertenece al tenant configurado en MICROSOFT_TENANT_ID')
+  }
+
+  const mailboxClaims = [payload.preferred_username, payload.email, payload.upn]
+    .filter((value): value is string => typeof value === 'string')
+    .map(value => value.trim().toLowerCase())
+  if (!mailboxClaims.includes(expectedMailbox.trim().toLowerCase())) {
+    throw new Error('Autoriza la misma cuenta principal que está configurada en Usuario IMAP')
+  }
+
+  return expectedMailbox.trim().toLowerCase()
+}
+
 export async function getMicrosoftAccessToken(config: EmailConfig) {
   if (!config.clientId || !config.clientSecret || !config.refreshToken) {
-    throw new Error('Falta configurar clientId, clientSecret o refreshToken de Microsoft 365')
+    throw new Error('Configura MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID y MICROSOFT_CLIENT_SECRET, y vuelve a conectar Microsoft 365')
   }
   const token = await tokenRequest(config, new URLSearchParams({
     client_id: config.clientId,

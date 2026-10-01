@@ -4,8 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { ArrowLeft, Mail, Loader2, ChevronRight, CheckCircle2, AlertCircle, Eye, EyeOff } from "lucide-react"
+import { ArrowLeft, Mail, Loader2, ChevronRight, CheckCircle2, AlertCircle } from "lucide-react"
 import Link from "next/link"
 import { apiFetch } from "@/lib/api"
 
@@ -14,9 +13,11 @@ export default function EmailSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
+  const [testMessage, setTestMessage] = useState('')
+  const [oauthConfigured, setOauthConfigured] = useState(false)
+  const [oauthMailbox, setOauthMailbox] = useState('')
   const [form, setForm] = useState({
     authMode: 'password' as 'password' | 'oauth2',
-    tenantId: 'common', clientId: '', clientSecret: '', refreshToken: '',
     enabled: false,
     imapHost: '', imapPort: '993', imapSecure: true, imapUser: '', imapPass: '',
     imapFolder: 'INBOX',
@@ -32,15 +33,24 @@ export default function EmailSettingsPage() {
       fetch('/api/categories').then(r => r.json()),
     ]).then(([cfg, cats]) => {
       setForm(prev => ({ ...prev, ...cfg }))
+      setOauthConfigured(Boolean(cfg.oauthConfigured))
+      setOauthMailbox(cfg.oauthMailbox || '')
       setCategories(cats || [])
-      const oauth = new URLSearchParams(window.location.search).get('oauth')
-      if (oauth === 'connected') setTestResult('ok')
-      if (oauth === 'error') setTestResult('error')
+      const params = new URLSearchParams(window.location.search)
+      const oauth = params.get('oauth')
+      if (oauth === 'connected') {
+        setTestResult('ok')
+        setTestMessage(`Microsoft 365 autorizó ${cfg.oauthMailbox || 'la cuenta'}.`)
+      }
+      if (oauth === 'error') {
+        setTestResult('error')
+        setTestMessage(params.get('message') || 'No se pudo conectar con Microsoft 365.')
+      }
     }).finally(() => setLoading(false))
   }, [])
 
   const handleSave = async () => {
-    setSaving(true); setTestResult(null)
+    setSaving(true); setTestResult(null); setTestMessage('')
     try {
       const res = await apiFetch('/api/settings/email', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
@@ -52,7 +62,7 @@ export default function EmailSettingsPage() {
   }
 
   const handleOAuthConnect = async () => {
-    setSaving(true); setTestResult(null)
+    setSaving(true); setTestResult(null); setTestMessage('')
     try {
       const res = await apiFetch('/api/settings/email', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
@@ -61,6 +71,7 @@ export default function EmailSettingsPage() {
       window.location.href = '/api/settings/email/oauth/start'
     } catch {
       setTestResult('error')
+      setTestMessage('No se pudo iniciar la conexión OAuth. Revisa la configuración del servidor.')
       setSaving(false)
     }
   }
@@ -96,12 +107,12 @@ export default function EmailSettingsPage() {
 
       {testResult === 'ok' && (
         <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          <CheckCircle2 className="h-5 w-5 shrink-0" /> Configuración guardada correctamente
+          <CheckCircle2 className="h-5 w-5 shrink-0" /> {testMessage || 'Configuración guardada correctamente'}
         </div>
       )}
       {testResult === 'error' && (
         <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <AlertCircle className="h-5 w-5 shrink-0" /> Error al guardar la configuración
+          <AlertCircle className="h-5 w-5 shrink-0" /> {testMessage || 'Error al guardar la configuración'}
         </div>
       )}
 
@@ -127,11 +138,12 @@ export default function EmailSettingsPage() {
             </Field>
             {form.authMode === 'oauth2' && (
               <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3">
-                <FieldInput label="Tenant ID" value={form.tenantId} onChange={e => setForm({ ...form, tenantId: e.target.value })} placeholder="common o ID del directorio" />
-                <FieldInput label="Application (client) ID" value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })} placeholder="ID de la aplicación en Entra ID" />
-                <FieldInput label="Client secret" type="password" value={form.clientSecret} onChange={e => setForm({ ...form, clientSecret: e.target.value })} placeholder="Secreto de la aplicación" />
-                <FieldInput label="Refresh token" type="password" value={form.refreshToken} onChange={e => setForm({ ...form, refreshToken: e.target.value })} placeholder="Se completa al conectar" />
-                <Button type="button" variant="outline" onClick={() => { void handleOAuthConnect() }} disabled={saving}>
+                <p className="text-xs text-muted-foreground">
+                  OAuth: {oauthConfigured ? 'credenciales del servidor configuradas' : 'faltan variables MICROSOFT_* en el servidor'}.
+                  {' '}La cuenta autorizada debe coincidir con Usuario IMAP.
+                </p>
+                {oauthMailbox && <p className="text-xs text-muted-foreground">Cuenta autorizada: {oauthMailbox}</p>}
+                <Button type="button" variant="outline" onClick={() => { void handleOAuthConnect() }} disabled={saving || !oauthConfigured || !form.imapUser.trim()}>
                   Conectar con Microsoft 365
                 </Button>
                 <p className="text-xs text-muted-foreground">Registra como URI de redirección: /api/settings/email/oauth/callback</p>
@@ -146,7 +158,7 @@ export default function EmailSettingsPage() {
               </label>
             </div>
             <FieldInput label="Usuario" value={form.imapUser} onChange={e => setForm({ ...form, imapUser: e.target.value })} placeholder="tickets@..." />
-            <FieldInput label="Contraseña" type="password" value={form.imapPass} onChange={e => setForm({ ...form, imapPass: e.target.value })} placeholder="••••••••" />
+            {form.authMode === 'password' && <FieldInput label="Contraseña" type="password" value={form.imapPass} onChange={e => setForm({ ...form, imapPass: e.target.value })} placeholder="••••••••" />}
             <div className="grid grid-cols-2 gap-3">
               <FieldInput label="Carpeta" value={form.imapFolder} onChange={e => setForm({ ...form, imapFolder: e.target.value })} placeholder="INBOX" />
               <FieldInput label="Intervalo (seg)" value={form.checkInterval} onChange={e => setForm({ ...form, checkInterval: e.target.value })} placeholder="60" />
@@ -179,7 +191,7 @@ export default function EmailSettingsPage() {
             </div>
               <p className="text-xs text-muted-foreground">Puerto 587: desactivado, usa STARTTLS. Puerto 465: activado.</p>
             <FieldInput label="Usuario" value={form.smtpUser} onChange={e => setForm({ ...form, smtpUser: e.target.value })} placeholder="tickets@..." />
-            <FieldInput label="Contraseña" type="password" value={form.smtpPass} onChange={e => setForm({ ...form, smtpPass: e.target.value })} placeholder="••••••••" />
+            {form.authMode === 'password' && <FieldInput label="Contraseña" type="password" value={form.smtpPass} onChange={e => setForm({ ...form, smtpPass: e.target.value })} placeholder="••••••••" />}
             <FieldInput label="Dirección Desde" value={form.fromAddress} onChange={e => setForm({ ...form, fromAddress: e.target.value })} placeholder="tickets@..." />
             <FieldInput label="Nombre Desde" value={form.fromName} onChange={e => setForm({ ...form, fromName: e.target.value })} placeholder="Help Desk IT" />
           </CardContent>

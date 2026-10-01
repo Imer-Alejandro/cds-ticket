@@ -4,7 +4,7 @@ import { getPrisma } from '../lib/prisma'
 import { loadEmailConfig, type EmailConfig } from '../lib/email-config'
 import { notifyUsers } from './socket'
 import { resolveEmailCategoriaId, resolveEmailRoleId } from '../../src/lib/mail/helpers'
-import { handleIncomingEmail } from '../../src/lib/mail/ingest'
+import { handleIncomingEmail, type IncomingEmail, type TicketRepo } from '../../src/lib/mail/ingest'
 import { autoAssignAgent } from '../../src/lib/assignment'
 import { makePrismaAssignmentRepo } from '../../src/lib/assignment-prisma'
 import { getMicrosoftAccessToken } from '../../src/lib/mail/oauth'
@@ -22,7 +22,15 @@ export async function checkMail(cfg?: EmailConfig) {
     const config = cfg || (await loadEmailConfig())
     if (!config.enabled || !config.imapHost || !config.imapUser) return
 
-    const accessToken = config.authMode === 'oauth2' ? await getMicrosoftAccessToken(config as any) : null
+    if (
+      config.authMode === 'oauth2' &&
+      config.oauthMailbox.trim().toLowerCase() !== config.imapUser.trim().toLowerCase()
+    ) {
+      console.error('[Mail] La cuenta autorizada en Microsoft 365 no coincide con Usuario IMAP. Vuelve a conectar esa misma cuenta.')
+      return
+    }
+
+    const accessToken = config.authMode === 'oauth2' ? await getMicrosoftAccessToken(config) : null
     if (config.authMode !== 'oauth2' && !config.imapPass) return
 
     client = new ImapFlow({
@@ -40,7 +48,7 @@ export async function checkMail(cfg?: EmailConfig) {
       if (!result) return
       const msgs = result as number[]
 
-      const categoriaId = (await resolveEmailCategoriaId({ defaultCategoriaId: config.defaultCategoriaId || '' } as any, prisma)) || undefined
+      const categoriaId = (await resolveEmailCategoriaId(config, prisma)) || undefined
 
       for (const seq of msgs) {
         try {
@@ -53,13 +61,13 @@ export async function checkMail(cfg?: EmailConfig) {
 
           const resultIngest = await handleIncomingEmail(
             {
-              repo: prisma as any,
+              repo: prisma as unknown as TicketRepo,
               defaultCategoriaId: categoriaId,
               resolveRoleId: () => resolveEmailRoleId(prisma),
               autoAssign: async ({ colaId }) => autoAssignAgent(makePrismaAssignmentRepo(prisma), colaId),
               log: console.log,
             },
-            parsed as any
+            parsed as unknown as IncomingEmail
           )
 
           if (!resultIngest) continue

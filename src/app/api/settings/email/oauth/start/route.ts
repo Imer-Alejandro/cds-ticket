@@ -12,19 +12,30 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await loadEmailConfig()
-  if (config.authMode !== 'oauth2' || !config.clientId) {
-    return NextResponse.json({ error: 'Configura OAuth2, clientId y tenantId antes de conectar' }, { status: 400 })
+  if (config.authMode !== 'oauth2') {
+    return NextResponse.json({ error: 'Selecciona Microsoft 365 OAuth2 antes de conectar' }, { status: 400 })
+  }
+  if (!config.tenantId || !config.clientId || !config.clientSecret) {
+    return NextResponse.json({ error: 'Faltan MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID o MICROSOFT_CLIENT_SECRET en el entorno del servidor' }, { status: 500 })
+  }
+  if (!config.imapUser) {
+    return NextResponse.json({ error: 'Completa Usuario IMAP antes de conectar Microsoft 365' }, { status: 400 })
   }
 
   const state = randomUUID()
+  const nonce = randomUUID()
   const redirectUri = microsoftRedirectUri(new URL(request.url).origin)
-  const response = NextResponse.redirect(microsoftAuthorizationUrl(config, redirectUri, state))
-  response.cookies.set('email_oauth_state', state, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 600,
-    path: '/api/settings/email/oauth',
-  })
+  const response = NextResponse.redirect(
+    microsoftAuthorizationUrl(config, redirectUri, state, nonce, config.imapUser)
+  )
+  for (const [name, value] of [['email_oauth_state', state], ['email_oauth_nonce', nonce]]) {
+    response.cookies.set(name, value, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 600,
+      path: '/api/settings/email/oauth',
+    })
+  }
   return response
 }
