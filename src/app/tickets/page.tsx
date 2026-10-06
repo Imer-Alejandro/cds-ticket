@@ -55,6 +55,17 @@ const TRANSICIONES: Record<string, string[]> = {
 
 type VistaFilter = "todos" | "mios" | "sinAsignar"
 
+// Barra pastel en el borde izquierdo de la fila según estado (la fila se mantiene blanca).
+const ESTADO_BARRA: Record<string, string> = {
+  NUEVO: "",              // sin tocar → blanco
+  ASIGNADO: "bg-blue-300",    // iniciado
+  EN_PROGRESO: "bg-emerald-300", // trabajando
+  PENDIENTE: "bg-purple-300",
+  RESUELTO: "bg-green-300",   // resuelto
+  CERRADO: "bg-slate-300",
+  ELIMINADO: "bg-rose-300",
+}
+
 export default function TicketsPage() {
   return (
     <Suspense fallback={
@@ -317,7 +328,13 @@ function TicketsContent() {
                     className={`border-b border-border/20 hover:bg-muted/20 transition-colors cursor-pointer group ${highlightedId === t.id ? 'bg-amber-100/70 dark:bg-amber-900/20 animate-pulse' : ''}`}
                     onClick={() => router.push(`/tickets/${t.id}`)}
                   >
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 relative">
+                      {ESTADO_BARRA[t.estado] && (
+                        <span
+                          aria-hidden
+                          className={`absolute left-1.5 top-1.5 bottom-1.5 w-1.5 rounded-full ${ESTADO_BARRA[t.estado]}`}
+                        />
+                      )}
                       <span className="font-mono text-xs font-semibold text-primary">{t.codigo}</span>
                     </td>
                     <td className="px-4 py-4">

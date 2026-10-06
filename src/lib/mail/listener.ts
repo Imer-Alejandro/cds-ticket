@@ -3,7 +3,7 @@ import { loadEmailConfig, type EmailConfig } from './config'
 import { resolveEmailCategoriaId, resolveEmailRoleId } from './helpers'
 import { handleIncomingEmail, type IngestResult, type IncomingEmail, type TicketRepo } from './ingest'
 import { runMailCheck, configPersistence, type MailCheckStatus } from './check'
-import { createNotification, emitTicketUpdate } from '@/lib/notifications'
+import { notifyIngestResult } from './notify-ingest'
 import { notifyByEmail, toTicketEmailData } from './notify-email'
 import { threadHeadersFromTicket } from './comment-email'
 import { autoAssignAgent } from '@/lib/assignment'
@@ -29,52 +29,6 @@ async function ingestParsed(parsed: IncomingEmail, config: EmailConfig): Promise
   )
 }
 
-/** Notifica en la app (agentes) y por correo al(s) implicado(s). */
-async function notifyIngestResult(result: IngestResult): Promise<void> {
-  if (result.kind === 'duplicate' || !result.ticketId) return
-  const ticket = await prisma.ticket.findUnique({
-    where: { id: result.ticketId },
-    include: {
-      solicitante: { select: { id: true, nombre: true, apellido: true, correo: true } },
-      agente: { select: { id: true, nombre: true, correo: true } },
-    },
-  })
-  if (!ticket) return
-
-  const thread = threadHeadersFromTicket(ticket)
-
-  if (result.kind === 'new') {
-    const agentes = await prisma.usuario.findMany({
-      where: { rol: { nombre: { in: ['Agente', 'Administrador'] } } },
-      select: { id: true },
-    })
-    for (const agente of agentes) {
-      await createNotification(agente.id, 'NUEVO_TICKET', `Nuevo ticket ${ticket.codigo}: ${ticket.asunto}`, ticket.id)
-    }
-    notifyByEmail({
-      type: 'TICKET_CREADO',
-      to: ticket.solicitante.correo,
-      nombre: `${ticket.solicitante.nombre}`,
-      data: toTicketEmailData({ ...ticket, descripcion: ticket.descripcion }),
-      ...thread,
-    })
-    void emitTicketUpdate({ id: ticket.id, codigo: ticket.codigo, asunto: ticket.asunto }, 'nuevo', 'email')
-  } else {
-    if (ticket.agente) {
-      await createNotification(ticket.agente.id, 'NUEVO_COMENTARIO', `Nuevo comentario en ${ticket.codigo} (por correo)`, ticket.id)
-      notifyByEmail({
-        type: 'NUEVO_COMENTARIO',
-        to: ticket.agente.correo,
-        nombre: ticket.agente.nombre,
-        data: toTicketEmailData({ ...ticket, descripcion: ticket.descripcion }),
-        comentario: 'El solicitante respondió por correo.',
-        ...thread,
-      })
-    }
-    void emitTicketUpdate({ id: ticket.id, codigo: ticket.codigo, asunto: ticket.asunto }, 'comentario', 'email')
-  }
-}
-
 /**
  * Revisión única de la bandeja (compatible con password y Microsoft 365 OAuth2).
  * Filtra el histórico con `monitorAfter` y marca los correos procesados como
@@ -87,7 +41,7 @@ export async function processIncomingEmails(): Promise<MailCheckStatus> {
     return runMailCheck({
       loadConfig: loadEmailConfig,
       ingest: ingestParsed,
-      onResult: notifyIngestResult,
+      onResult: (result) => notifyIngestResult(result),
       ...persist,
     })
   })().finally(() => {

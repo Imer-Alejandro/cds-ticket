@@ -72,7 +72,7 @@ En desarrollo:
 http://localhost:3000/api/settings/email/oauth/callback
 ```
 
-Agrega los permisos delegados `IMAP.AccessAsUser.All`, `SMTP.Send` y `offline_access`, concede consentimiento de administrador si la organización lo solicita y genera un client secret. Captura el **Tenant ID**, **Application (client) ID** y **Client secret** en la aplicación. Después pulsa **Conectar con Microsoft 365** y autoriza el buzón. El sistema guardará el refresh token y lo renovará automáticamente.
+Agrega los permisos delegados `IMAP.AccessAsUser.All`, `SMTP.Send`, `Mail.Send` (envío vía Microsoft Graph, necesario cuando el tenant bloquea SMTP AUTH) y `offline_access`, concede consentimiento de administrador si la organización lo solicita y genera un client secret. Captura el **Tenant ID**, **Application (client) ID** y **Client secret** en la aplicación. Después pulsa **Conectar con Microsoft 365** y autoriza el buzón. El sistema guardará el refresh token y lo renovará automáticamente.
 
 ### 4. **Configurar Canalización de Peticiones**
 

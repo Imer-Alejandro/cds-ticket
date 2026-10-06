@@ -65,7 +65,7 @@ class EmailOutbox {
       try {
         await this.sendFn(msg)
         this.sentCount++
-      } catch {
+      } catch (err) {
         const attempts = (this.retryCount.get(msg) ?? 0) + 1
         if (attempts <= this.maxRetries) {
           this.retryCount.set(msg, attempts)
@@ -74,6 +74,10 @@ class EmailOutbox {
         } else {
           this.failedCount++
           this.retryCount.delete(msg)
+          console.error(
+            `[Mail] Email a ${msg.to} falló tras ${this.maxRetries} reintentos (asunto: ${msg.subject}):`,
+            err
+          )
         }
       }
     }

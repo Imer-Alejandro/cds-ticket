@@ -10,6 +10,15 @@ export const MICROSOFT_SCOPES = [
   'https://outlook.office.com/SMTP.Send',
 ].join(' ')
 
+/** Permiso delegado de Microsoft Graph necesario para enviar correo (sendMail). */
+export const GRAPH_SEND_SCOPE = 'https://graph.microsoft.com/Mail.Send'
+
+/**
+ * Scope del refresh token usado para enviar vía Graph. Es UN scope separado del
+ * de IMAP/SMTP para que el monitoreo no dependa de que Mail.Send esté concedido.
+ */
+export const GRAPH_SCOPES = ['offline_access', GRAPH_SEND_SCOPE].join(' ')
+
 const microsoftJwks = createRemoteJWKSet(
   new URL('https://login.microsoftonline.com/common/discovery/v2.0/keys')
 )
@@ -38,7 +47,9 @@ export function microsoftAuthorizationUrl(
     response_type: 'code',
     redirect_uri: redirectUri,
     response_mode: 'query',
-    scope: MICROSOFT_SCOPES,
+    // Incluye Mail.Send para que "Conectar con Microsoft 365" conceda también
+    // el envío vía Graph; el intercambio/refresh de tokens sigue con scopes IMAP.
+    scope: [MICROSOFT_SCOPES, GRAPH_SEND_SCOPE].join(' '),
     state,
     nonce,
     login_hint: loginHint,
@@ -111,6 +122,35 @@ export async function getMicrosoftAccessToken(
   config: EmailConfig,
   onRefreshToken?: (refreshToken: string) => Promise<void>,
 ) {
+  return refreshMicrosoftToken(config, MICROSOFT_SCOPES, onRefreshToken)
+}
+
+/**
+ * Access token con el permiso Mail.Send de Microsoft Graph, para enviar correo
+ * cuando el tenant tiene SMTP AUTH bloqueado (535 SmtpClientAuthentication).
+ */
+export async function getMicrosoftGraphAccessToken(
+  config: EmailConfig,
+  onRefreshToken?: (refreshToken: string) => Promise<void>,
+) {
+  try {
+    return await refreshMicrosoftToken(config, GRAPH_SCOPES, onRefreshToken)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/AADSTS65001|AADSTS65000|AADSTS65005|AADSTS700016/.test(message)) {
+      throw new Error(
+        `${message} — La aplicación necesita el permiso delegado Mail.Send: agrégalo en Entra ID (Permisos de API > Mail.Send > otorgar consentimiento) o vuelve a conectar Microsoft 365 desde Ajustes > Correo.`,
+      )
+    }
+    throw error
+  }
+}
+
+async function refreshMicrosoftToken(
+  config: EmailConfig,
+  scope: string,
+  onRefreshToken?: (refreshToken: string) => Promise<void>,
+) {
   if (!config.clientId || !config.clientSecret || !config.refreshToken) {
     throw new Error('Configura MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID y MICROSOFT_CLIENT_SECRET, y vuelve a conectar Microsoft 365')
   }
@@ -119,7 +159,7 @@ export async function getMicrosoftAccessToken(
     client_secret: config.clientSecret,
     grant_type: 'refresh_token',
     refresh_token: config.refreshToken,
-    scope: MICROSOFT_SCOPES,
+    scope,
   }))
   if (token.refresh_token && token.refresh_token !== config.refreshToken && onRefreshToken) {
     try {
@@ -128,6 +168,9 @@ export async function getMicrosoftAccessToken(
       // No fallar la revisión por no poder persistir el token rotado;
       // el siguiente ciclo reintentará con el refresh token guardado.
     }
+  }
+  if (!token.access_token) {
+    throw new Error('Microsoft no devolvió un token de acceso')
   }
   return token.access_token
 }

@@ -2,12 +2,14 @@ import nodemailer from 'nodemailer'
 import { loadEmailConfig, saveEmailConfig } from './config'
 import { createOutbox, type EmailMessage, type EmailOutboxInstance } from './outbox'
 import { extractTicketCode } from './core'
-import { getMicrosoftAccessToken } from './oauth'
+import { getMicrosoftGraphAccessToken } from './oauth'
+import { sendEmailViaGraph } from './graph'
 
 let outbox: EmailOutboxInstance | null = null
 
 /**
- * Envía un mensaje real por SMTP usando la configuración guardada en BD.
+ * Envía un mensaje real usando la configuración guardada en BD.
+ * OAuth2 → Microsoft Graph (el tenant bloquea SMTP AUTH); password → SMTP.
  * Incluye cabeceras de hilo de conversación (In-Reply-To, References, Message-ID).
  */
 export async function sendEmail(
@@ -17,19 +19,27 @@ export async function sendEmail(
   headers?: { messageId?: string; inReplyTo?: string; references?: string }
 ): Promise<void> {
   const config = await loadEmailConfig()
-  if (!config.smtpHost || !config.fromAddress) return
+  if (!config.fromAddress) {
+    console.warn('[Mail] Email no enviado: falta fromAddress en Ajustes > Correo')
+    return
+  }
 
-  const accessToken = config.authMode === 'oauth2'
-    ? await getMicrosoftAccessToken(config, async (refreshToken) => { await saveEmailConfig({ refreshToken }) })
-    : null
+  if (config.authMode === 'oauth2') {
+    const accessToken = await getMicrosoftGraphAccessToken(config, async (refreshToken) => { await saveEmailConfig({ refreshToken }) })
+    await sendEmailViaGraph(config, accessToken, { to, subject, html, headers })
+    return
+  }
+
+  if (!config.smtpHost) {
+    console.warn('[Mail] Email no enviado: SMTP sin configurar (falta smtpHost en Ajustes > Correo)')
+    return
+  }
 
   const transporter = nodemailer.createTransport({
     host: config.smtpHost,
     port: config.smtpPort,
     secure: config.smtpSecure,
-    auth: accessToken
-      ? { type: 'OAuth2', user: config.smtpUser || config.fromAddress, accessToken }
-      : config.smtpUser ? { user: config.smtpUser, pass: config.smtpPass } : undefined,
+    auth: config.smtpUser ? { user: config.smtpUser, pass: config.smtpPass } : undefined,
   })
 
   const domain = config.fromAddress.split('@')[1] || 'cds-ticket.local'

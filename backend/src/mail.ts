@@ -6,6 +6,7 @@ import { handleIncomingEmail, type IncomingEmail, type TicketRepo } from '../../
 import { autoAssignAgent } from '../../src/lib/assignment'
 import { makePrismaAssignmentRepo } from '../../src/lib/assignment-prisma'
 import { runMailCheck, configPersistence, type MailCheckStatus } from '../../src/lib/mail/check'
+import { notifyIngestResult } from '../../src/lib/mail/notify-ingest'
 
 let timerHandle: ReturnType<typeof setTimeout> | null = null
 let stopped = true
@@ -32,6 +33,12 @@ async function runCheck(cfg?: EmailConfig): Promise<MailCheckStatus> {
       )
     },
     onResult: async (result) => {
+      // Campanita in-app + correo (agente asignado y administradores).
+      try {
+        await notifyIngestResult(result)
+      } catch (err) {
+        console.error('[Mail] Error al notificar el resultado de ingesta:', err)
+      }
       const agentes = await prisma.usuario.findMany({
         where: { rol: { nombre: { in: ['Agente', 'Administrador'] } } },
         select: { id: true },

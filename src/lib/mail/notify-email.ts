@@ -63,8 +63,9 @@ export function notifyByEmail(ev: EmailEvent): void {
   try {
     const msg = buildEmailMessage(ev)
     enqueueEmail(msg)
-  } catch {
-    // el email no puede romper el flujo
+  } catch (err) {
+    // el email no puede romper el flujo, pero el fallo debe quedar en el log
+    console.error('[Mail] Error al encolar email de notificación:', err)
   }
 }
 
