@@ -248,6 +248,26 @@ describe('runMailCheck — conexión y proceso', () => {
     expect(hooks.onResult).not.toHaveBeenCalled()
   })
 
+  it('un duplicado (Message-ID ya ingerido) se marca \\Seen y NO notifica', async () => {
+    const hooks = makeHooks({
+      ingest: vi.fn(async () => ({ kind: 'duplicate' as const, ticketId: 't1', codigo: 'TK-00001' })),
+    })
+    const { client, seen } = makeFakeClient({
+      candidates: [1],
+      metadata: [{ seq: 1, internalDate: new Date('2026-01-02T10:00:00.000Z') }],
+    })
+
+    const status = await runMailCheck({ ...hooks, createClient: () => client as any })
+
+    expect(seen).toEqual([1])
+    expect(status.duplicates).toBe(1)
+    expect(status.processed).toBe(0)
+    expect(status.ignored).toBe(0)
+    expect(hooks.onResult).not.toHaveBeenCalled()
+    expect(status.message).toContain('1 duplicado(s)')
+    expect(lastStatus(hooks).duplicates).toBe(1)
+  })
+
   it('un error al procesar un correo NO marca \\Seen y no detiene el resto', async () => {
     const hooks = makeHooks({
       ingest: vi.fn()

@@ -31,6 +31,55 @@ export function extractTicketCode(
 }
 
 /**
+ * Normaliza un Message-ID quitando ángulos y espacios extra.
+ * Devuelve null si no hay valor utilizable.
+ */
+export function normalizeMessageId(value?: string | string[] | null): string | null {
+  if (!value) return null
+  const raw = Array.isArray(value) ? value.join(' ') : String(value)
+  const normalized = raw.replace(/[<>]/g, ' ').replace(/\s+/g, ' ').trim()
+  return normalized || null
+}
+
+/**
+ * Extrae los Message-ID candidatos a vínculo de hilo a partir de las
+ * cabeceras In-Reply-To y References (sin ángulos, únicos, en orden).
+ * No incluye el Message-ID actual (ese es el mensaje que llega).
+ */
+export function headerThreadIds(
+  headers?: { inReplyTo?: string | null; references?: string | string[] | null; messageId?: string | null } | null
+): string[] {
+  if (!headers) return []
+  const parts = [
+    headers.inReplyTo,
+    Array.isArray(headers.references) ? headers.references.join(' ') : headers.references,
+  ]
+  const out: string[] = []
+  for (const part of parts) {
+    if (!part) continue
+    for (const token of String(part).replace(/[<>]/g, ' ').split(/\s+/)) {
+      if (token && !out.includes(token)) out.push(token)
+    }
+  }
+  return out
+}
+
+/**
+ * Fusiona cadenas de Message-ID (threadRefs guardado + cabeceras entrantes)
+ * en una cadena única, separada por espacios, sin ángulos y sin duplicados.
+ */
+export function mergeThreadRefs(...values: (string | null | undefined)[]): string | null {
+  const out: string[] = []
+  for (const value of values) {
+    if (!value) continue
+    for (const token of String(value).replace(/[<>]/g, ' ').split(/\s+/)) {
+      if (token && !out.includes(token)) out.push(token)
+    }
+  }
+  return out.length ? out.join(' ') : null
+}
+
+/**
  * Determina si un correo entrante es una respuesta a un ticket existente
  * (contiene código de ticket en el asunto o en sus cabeceras SMTP).
  */

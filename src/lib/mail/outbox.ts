@@ -6,6 +6,10 @@ export interface EmailMessage {
   to: string
   subject: string
   html: string
+  /** Cabeceras de hilo SMTP (Message-ID de referencia de la rama). */
+  inReplyTo?: string | null
+  /** Cadena References completa (space-separated, con ángulos). */
+  references?: string | null
 }
 
 export type SendFn = (msg: EmailMessage) => Promise<void>

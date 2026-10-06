@@ -4,6 +4,7 @@ import { getSession } from '@/lib/auth'
 import { hasPermission } from '@/lib/permissions'
 import { createNotification, emitTicketUpdate } from '@/lib/notifications'
 import { notifyByEmail, toTicketEmailData } from '@/lib/mail/notify-email'
+import { threadHeadersFromTicket } from '@/lib/mail/comment-email'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -171,6 +172,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         nivelPrioridad: updated.nivelPrioridad,
         descripcion: ticket.descripcion,
       })
+      const thread = threadHeadersFromTicket(ticket)
 
       if (data.agenteId && data.agenteId !== ticket.agenteId) {
         const agente = await prisma.usuario.findUnique({ where: { id: data.agenteId } })
@@ -180,6 +182,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             to: agente.correo,
             agenteNombre: `${agente.nombre} ${agente.apellido}`.trim(),
             data: mailData,
+            ...thread,
           })
         }
       }
@@ -193,6 +196,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             nombre: `${solicitante.nombre} ${solicitante.apellido}`.trim(),
             data: mailData,
             estadoLabel: data.estado.replace(/_/g, ' '),
+            ...thread,
           })
         }
       }

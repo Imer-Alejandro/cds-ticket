@@ -44,10 +44,22 @@ export async function sendEmail(
 
   if (ticketCode) {
     const rootMessageId = `<${ticketCode.toLowerCase()}-root@${domain}>`
+    // Normaliza a formato <id> sin romper cadenas References (space-separated).
+    const wrapIds = (value?: string) =>
+      value
+        ? value
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((token) => (token.startsWith('<') ? token : `<${token}>`))
+            .join(' ')
+        : undefined
+    const inReplyTo = wrapIds(headers?.inReplyTo) || rootMessageId
     mailOptions.messageId = headers?.messageId || `<${ticketCode.toLowerCase()}-${Date.now()}@${domain}>`
     mailOptions.headers = {
-      'In-Reply-To': headers?.inReplyTo || rootMessageId,
-      'References': headers?.references || rootMessageId,
+      'In-Reply-To': inReplyTo,
+      // References = la cadena de la rama (incluye al padre); si no hay cadena,
+      // se reconstruye con el padre y la raíz sintética del ticket.
+      'References': wrapIds(headers?.references) || [inReplyTo, rootMessageId].filter(Boolean).join(' '),
     }
   }
 
@@ -61,8 +73,11 @@ export async function sendEmail(
 export function enqueueEmail(msg: EmailMessage): void {
   if (!outbox) {
     outbox = createOutbox({
-      send: async ({ to, subject, html }) => {
-        await sendEmail(to, subject, html)
+      send: async ({ to, subject, html, inReplyTo, references }) => {
+        await sendEmail(to, subject, html, {
+          inReplyTo: inReplyTo ?? undefined,
+          references: references ?? undefined,
+        })
       },
       enabled: () => true,
     })

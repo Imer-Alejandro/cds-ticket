@@ -1,4 +1,14 @@
-import { extractTicketCode, isReplyEmail, nextTicketCode, emailBodyToText, normalizeFromAddress, cleanReplyText } from './core'
+import {
+  extractTicketCode,
+  isReplyEmail,
+  nextTicketCode,
+  emailBodyToText,
+  normalizeFromAddress,
+  cleanReplyText,
+  normalizeMessageId,
+  headerThreadIds,
+  mergeThreadRefs,
+} from './core'
 import type { AgenteCandidato } from '@/lib/assignment'
 
 export interface IncomingEmail {
@@ -51,7 +61,20 @@ export interface TicketRepo {
     findUnique(args: any): Promise<any>
     findFirst(args: any): Promise<any>
   }
-  comentario: { create(args: any): Promise<any> }
+  comentario: {
+    create(args: any): Promise<any>
+    findFirst?(args: { where: { messageId: { in: string[] } }; select: { ticketId: true } }): Promise<{ ticketId: string } | null>
+  }
+  /** Registro de Message-IDs ya ingeridos (deduplicación). Opcional para stubs. */
+  correoProcesado?: {
+    findUnique(args: { where: { messageId: string } }): Promise<{
+      messageId: string
+      ticketId?: string | null
+      codigo?: string | null
+      origen?: string | null
+    } | null>
+    create(args: { data: { messageId: string; ticketId: string; codigo: string; origen: string } }): Promise<unknown>
+  }
   logTicket: { create(args: any): Promise<any> }
   adjunto: { createMany(args: any): Promise<any> }
   sla: { findFirst(args: any): Promise<any> }
@@ -67,7 +90,7 @@ export interface TicketRepo {
 }
 
 export interface IngestResult {
-  kind: 'reply' | 'new'
+  kind: 'reply' | 'new' | 'duplicate'
   ticketId: string
   codigo: string
   reply?: boolean
@@ -90,20 +113,35 @@ export interface IngestDeps {
   resolveRoleId?: () => Promise<string | null>
   /** Asignación automática por carga de la cola (si está configurada). */
   autoAssign?: (info: { colaId: string }) => Promise<AgenteCandidato | null>
+  /** Direcciones que envía el propio sistema: sus correos se ignoran (anti-loop). */
+  systemFroms?: string[]
   log?: (msg: string) => void
+}
+
+/** Ticket mínimo que necesita el flujo de respuesta por correo. */
+export interface TicketHilo {
+  id: string
+  codigo: string
+  solicitanteId: string
+  messageId?: string | null
+  threadRefs?: string | null
+  ultimoMessageId?: string | null
 }
 
 /**
  * Crea un comentario en el ticket original cuando llega una respuesta por correo.
- * Asigna automáticamente la etiqueta "Solicitante respondió" y limpia la cita del correo previo.
+ * Asigna automáticamente la etiqueta "Solicitante respondió", limpia la cita del
+ * correo previo y actualiza el hilo de conversación del ticket (Message-IDs).
  */
-async function replyToTicket(deps: IngestDeps, email: IncomingEmail, codigo: string) {
+async function replyToTicket(
+  deps: IngestDeps,
+  email: IncomingEmail,
+  ticket: TicketHilo,
+  headers: { inReplyTo?: string | null; references?: string | string[] | null; messageId?: string | null } | null
+) {
   const { repo, log } = deps
-  const ticket = await repo.ticket.findUnique({ where: { codigo } })
-  if (!ticket) {
-    log?.(`[Mail] Respuesta a ticket inexistente: ${codigo}`)
-    return null
-  }
+  const codigo = ticket.codigo
+  const incomingMessageId = normalizeMessageId(headers?.messageId)
 
   const fromEmail = normalizeFromAddress(email.from) || ''
   const rawBody = emailBodyToText(email as any, 5000)
@@ -115,6 +153,7 @@ async function replyToTicket(deps: IngestDeps, email: IncomingEmail, codigo: str
       usuarioId: ticket.solicitanteId,
       mensaje: cleanedBody || rawBody,
       esInterno: false,
+      messageId: incomingMessageId,
     },
   })
 
@@ -168,6 +207,18 @@ async function replyToTicket(deps: IngestDeps, email: IncomingEmail, codigo: str
     })
   }
 
+  // Actualizar el hilo de conversación del ticket con los Message-IDs entrantes
+  const incomingRefs = headerThreadIds(headers).join(' ')
+  if (incomingMessageId || incomingRefs) {
+    await repo.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        ultimoMessageId: incomingMessageId ?? ticket.ultimoMessageId ?? null,
+        threadRefs: mergeThreadRefs(ticket.threadRefs, incomingRefs, incomingMessageId),
+      },
+    })
+  }
+
   log?.(`[Mail] Respuesta vinculada a ${codigo} como comentario`)
   return ticket
 }
@@ -188,20 +239,89 @@ export async function handleIncomingEmail(
   }
   const decision = decideIncomingEmail(email.from, email.subject, headers)
   const fromEmail = decision.fromEmail
+  const incomingMessageId = normalizeMessageId(headers.messageId)
 
   if (!fromEmail) {
     log?.('[Mail] Ignorado: sin dirección de remitente')
     return null
   }
 
+  // Anti-loop: correos generados por el propio sistema que llegan al INBOX
+  if (deps.systemFroms?.some((addr) => addr?.trim().toLowerCase() === fromEmail)) {
+    log?.(`[Mail] Ignorado: correo saliente del propio sistema (${fromEmail})`)
+    return null
+  }
+
+  // Deduplicación: si el Message-ID ya fue ingerido, no repetir ticket/comentario
+  // (ocurre cuando un correo procesado se vuelve a marcar como no leído).
+  if (incomingMessageId && repo.correoProcesado?.findUnique) {
+    const previo = await repo.correoProcesado.findUnique({ where: { messageId: incomingMessageId } })
+    if (previo) {
+      log?.(`[Mail] Correo ya procesado (${incomingMessageId}); se omite`)
+      return {
+        kind: 'duplicate',
+        ticketId: previo.ticketId ?? '',
+        codigo: previo.codigo ?? '',
+        reply: previo.origen === 'reply',
+      }
+    }
+  }
+
+  /** Registra el Message-ID ingerido para no procesarlo dos veces. */
+  const registrarCorreo = async (ticketId: string, codigo: string, origen: 'new' | 'reply') => {
+    if (!incomingMessageId || !repo.correoProcesado?.create) return
+    try {
+      await repo.correoProcesado.create({
+        data: { messageId: incomingMessageId, ticketId, codigo, origen },
+      })
+    } catch (err) {
+      // Carrera u otro escáner ya lo registró: no debe romper el proceso.
+      log?.(`[Mail] No se pudo registrar el Message-ID: ${(err as Error).message}`)
+    }
+  }
+
   // Respuesta a ticket existente → crear comentario
   if (decision.kind === 'reply' && decision.codigo) {
-    const replied = await replyToTicket(deps, email, decision.codigo)
-    if (replied) {
-      return { kind: 'reply', ticketId: replied.id, codigo: decision.codigo, reply: true }
+    const ticketPorCodigo = await repo.ticket.findUnique({ where: { codigo: decision.codigo } })
+    if (ticketPorCodigo) {
+      const replied = await replyToTicket(deps, email, ticketPorCodigo, headers)
+      if (replied) {
+        await registrarCorreo(replied.id, decision.codigo, 'reply')
+        return { kind: 'reply', ticketId: replied.id, codigo: decision.codigo, reply: true }
+      }
+    } else {
+      log?.(`[Mail] Respuesta a ticket inexistente: ${decision.codigo}`)
     }
     // Si el código no existe, no crear ticket nuevo con un código fantasma:
     // continuamos al flujo normal pero sin el código en el asunto.
+  }
+
+  // Respuesta por cabeceras de hilo aunque el asunto NO traiga código TK:
+  // el solicitante respondió al correo original o a un mensaje previo del hilo.
+  const candidatos = headerThreadIds(headers)
+  if (candidatos.length) {
+    let ticketHilo: TicketHilo | null = null
+    if (repo.ticket.findFirst) {
+      ticketHilo = await repo.ticket.findFirst({
+        where: { OR: [{ messageId: { in: candidatos } }, { ultimoMessageId: { in: candidatos } }] },
+      })
+    }
+    if (!ticketHilo && repo.comentario.findFirst) {
+      const comentarioPrevio = await repo.comentario.findFirst({
+        where: { messageId: { in: candidatos } },
+        select: { ticketId: true },
+      })
+      if (comentarioPrevio?.ticketId) {
+        ticketHilo = await repo.ticket.findUnique({ where: { id: comentarioPrevio.ticketId } })
+      }
+    }
+    if (ticketHilo) {
+      const replied = await replyToTicket(deps, email, ticketHilo, headers)
+      if (replied) {
+        await registrarCorreo(replied.id, ticketHilo.codigo, 'reply')
+        return { kind: 'reply', ticketId: replied.id, codigo: ticketHilo.codigo, reply: true }
+      }
+    }
   }
 
   // Obtener o crear el usuario solicitante
@@ -263,6 +383,10 @@ export async function handleIncomingEmail(
       categoriaId,
       slaId: sla?.id ?? null,
       origen: 'CORREO',
+      // Hilo de conversación: este correo inicia la rama de la plataforma
+      messageId: incomingMessageId,
+      ultimoMessageId: incomingMessageId,
+      threadRefs: incomingMessageId,
     },
     include: { solicitante: { select: { nombre: true, apellido: true, correo: true } } },
   })
@@ -320,6 +444,7 @@ export async function handleIncomingEmail(
     })
   }
 
+  await registrarCorreo(ticket.id, codigo, 'new')
   log?.(`[Mail] Ticket ${codigo} creado desde correo de ${fromEmail}`)
   return { kind: 'new', ticketId: ticket.id, codigo }
 }

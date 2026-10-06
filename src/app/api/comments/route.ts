@@ -3,7 +3,8 @@ import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { hasPermission } from '@/lib/permissions'
 import { createNotification, emitTicketUpdate } from '@/lib/notifications'
-import { notifyByEmail, toTicketEmailData } from '@/lib/mail/notify-email'
+import { notifyByEmail } from '@/lib/mail/notify-email'
+import { buildCommentEmailEvents } from '@/lib/mail/comment-email'
 
 const MAX_ADJUNTOS = 10
 const MAX_TAMAÑO_BYTES = 10 * 1024 * 1024
@@ -36,7 +37,20 @@ export async function POST(request: Request) {
 
     const ticket = await prisma.ticket.findUnique({
       where: { id: data.ticketId },
-      select: { id: true, codigo: true, solicitanteId: true, agenteId: true, estado: true, fechaPrimeraRespuesta: true },
+      select: {
+        id: true,
+        codigo: true,
+        asunto: true,
+        estado: true,
+        nivelPrioridad: true,
+        descripcion: true,
+        solicitanteId: true,
+        agenteId: true,
+        fechaPrimeraRespuesta: true,
+        messageId: true,
+        threadRefs: true,
+        ultimoMessageId: true,
+      },
     })
     if (!ticket) return NextResponse.json({ error: 'Ticket no encontrado' }, { status: 404 })
 
@@ -123,7 +137,7 @@ export async function POST(request: Request) {
       }
     }
 
-    if (!data.esInterno) {
+    if (!esInterno) {
       if (ticket.solicitanteId && ticket.solicitanteId !== session.id) {
         await createNotification(ticket.solicitanteId, 'NUEVO_COMENTARIO', `Nuevo comentario en ${ticket.codigo}`, ticket.id)
       }
@@ -132,44 +146,36 @@ export async function POST(request: Request) {
       }
     }
 
-    // Emails de notificación de comentario (nunca para comentarios internos)
-    if (!data.esInterno) {
+    // Emails de notificación de comentario (nunca para comentarios internos),
+    // con cabeceras de hilo SMTP para que el destinatario responda en la misma rama.
+    if (!esInterno) {
       try {
-        const mailData = await prisma.ticket.findUnique({
-          where: { id: ticket.id },
-          select: { codigo: true, asunto: true, estado: true, nivelPrioridad: true, descripcion: true },
+        const [solicitante, agente] = await Promise.all([
+          ticket.solicitanteId ? prisma.usuario.findUnique({ where: { id: ticket.solicitanteId } }) : null,
+          ticket.agenteId ? prisma.usuario.findUnique({ where: { id: ticket.agenteId } }) : null,
+        ])
+        const events = buildCommentEmailEvents({
+          ticket,
+          autorId: session.id as string,
+          esInterno,
+          solicitante: solicitante
+            ? {
+                id: solicitante.id,
+                nombre: `${solicitante.nombre} ${solicitante.apellido}`.trim() || solicitante.nombre,
+                correo: solicitante.correo,
+              }
+            : null,
+          agente: agente
+            ? {
+                id: agente.id,
+                nombre: `${agente.nombre} ${agente.apellido}`.trim() || agente.nombre,
+                correo: agente.correo,
+              }
+            : null,
+          comentario: data.mensaje,
         })
-        const emailData = mailData ? toTicketEmailData(mailData) : toTicketEmailData({
-          codigo: ticket.codigo,
-          asunto: 'Ticket',
-          estado: ticket.estado,
-          nivelPrioridad: 'MEDIA',
-          descripcion: '',
-        })
-
-        if (ticket.solicitanteId && ticket.solicitanteId !== session.id) {
-          const solicitante = await prisma.usuario.findUnique({ where: { id: ticket.solicitanteId } })
-          if (solicitante?.correo) {
-            notifyByEmail({
-              type: 'NUEVO_COMENTARIO',
-              to: solicitante.correo,
-              nombre: `${solicitante.nombre} ${solicitante.apellido}`.trim(),
-              data: emailData,
-              comentario: data.mensaje,
-            })
-          }
-        }
-        if (ticket.agenteId && ticket.agenteId !== session.id) {
-          const agente = await prisma.usuario.findUnique({ where: { id: ticket.agenteId } })
-          if (agente?.correo) {
-            notifyByEmail({
-              type: 'NUEVO_COMENTARIO',
-              to: agente.correo,
-              nombre: `${agente.nombre} ${agente.apellido}`.trim(),
-              data: emailData,
-              comentario: data.mensaje,
-            })
-          }
+        for (const ev of events) {
+          notifyByEmail(ev)
         }
       } catch (e) {
         console.error('Error enviando email de comentario:', e)

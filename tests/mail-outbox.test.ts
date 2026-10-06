@@ -56,4 +56,25 @@ describe('email outbox', () => {
     expect(box.stats().sent).toBe(1)
     expect(box.stats().failed).toBe(0)
   })
+
+  it('las cabeceras de hilo llegan intactas al transporte', async () => {
+    const send = vi.fn().mockResolvedValue(undefined)
+    const box = createTestOutbox(send)
+
+    box.enqueue({
+      to: 'a@x.com',
+      subject: '[TK-00001] Respuesta',
+      html: 'h',
+      inReplyTo: '<previo@mail>',
+      references: '<raiz@mail> <previo@mail>',
+    })
+    await box.flush()
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inReplyTo: '<previo@mail>',
+        references: '<raiz@mail> <previo@mail>',
+      })
+    )
+  })
 })

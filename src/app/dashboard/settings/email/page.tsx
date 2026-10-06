@@ -15,6 +15,7 @@ interface EmailCheckStatus {
   folder: string
   found: number
   processed: number
+  duplicates?: number
   ignored: number
   errors: number
   baseline: boolean
@@ -325,7 +326,7 @@ function StatusBanner({ status }: { status: EmailStatus | null }) {
       <CheckCircle2 className="h-5 w-5 shrink-0" />
       <span>
         Última revisión {haceTexto(status.last.at)} en <strong>{status.last.folder || 'INBOX'}</strong>:{' '}
-        {status.last.processed} procesado(s), {status.last.ignored} ignorado(s), {status.last.errors} error(es).
+        {status.last.processed} procesado(s), {status.last.duplicates ?? 0} duplicado(s), {status.last.ignored} ignorado(s), {status.last.errors} error(es).
         {status.last.baseline ? ' Se estableció el punto inicial: el histórico no se importa.' : ` ${status.last.message}`}
       </span>
     </div>

@@ -115,8 +115,12 @@ model Ticket {
   categoriaId           String    @db.Uuid
   colaId                String?   @db.Uuid
   slaId                 String?   @db.Uuid
-  origen                String // WEB, CORREO
-  fechaCreacion         DateTime  @default(now())
+    origen                String // WEB, CORREO
+    // Hilo de correo: identidad del mensaje que creó el ticket y cadena del hilo
+    messageId             String?  @unique // Message-ID raíz (normalizado sin <>)
+    threadRefs            String?  // cadena References acumulada (space-separated)
+    ultimoMessageId       String?  // último mensaje del hilo (para In-Reply-To saliente)
+    fechaCreacion         DateTime  @default(now())
   fechaPrimeraRespuesta DateTime?
   fechaPendiente        DateTime?
   fechaResolucion       DateTime?
@@ -136,16 +140,17 @@ model Ticket {
   notificaciones Notificacion[]
 }
 
-model Comentario {
-  id        String   @id @default(uuid()) @db.Uuid
-  ticketId  String   @db.Uuid
-  usuarioId String   @db.Uuid
-  mensaje   String
-  esInterno Boolean  @default(false)
-  fecha     DateTime @default(now())
+  model Comentario {
+    id        String   @id @default(uuid()) @db.Uuid
+    ticketId  String   @db.Uuid
+    usuarioId String   @db.Uuid
+    mensaje   String
+    esInterno Boolean  @default(false)
+    messageId String?  // Message-ID del correo entrante que originó el comentario
+    fecha     DateTime @default(now())
 
-  ticket   Ticket    @relation(fields: [ticketId], references: [id])
-  usuario  Usuario   @relation(fields: [usuarioId], references: [id])
+    ticket   Ticket    @relation(fields: [ticketId], references: [id])
+    usuario  Usuario   @relation(fields: [usuarioId], references: [id])
   adjuntos Adjunto[]
 }
 
@@ -248,4 +253,18 @@ model Configuracion {
   clave String @unique
   valor String
   grupo String
+}
+
+// Message-IDs de correo ya ingeridos: evita crear tickets o comentarios
+// duplicados cuando un mensaje se re-procesa (p. ej. vuelve a marcarse
+// como no leído o llega una copia del mismo correo).
+model CorreoProcesado {
+  id          String   @id @default(uuid()) @db.Uuid
+  messageId   String   @unique
+  ticketId    String?  @db.Uuid
+  codigo      String?
+  origen      String? // new | reply
+  procesadoEn DateTime @default(now())
+
+  @@index([ticketId])
 }

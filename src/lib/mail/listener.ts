@@ -5,6 +5,7 @@ import { handleIncomingEmail, type IngestResult, type IncomingEmail, type Ticket
 import { runMailCheck, configPersistence, type MailCheckStatus } from './check'
 import { createNotification, emitTicketUpdate } from '@/lib/notifications'
 import { notifyByEmail, toTicketEmailData } from './notify-email'
+import { threadHeadersFromTicket } from './comment-email'
 import { autoAssignAgent } from '@/lib/assignment'
 import { makePrismaAssignmentRepo } from '@/lib/assignment-prisma'
 
@@ -21,6 +22,7 @@ async function ingestParsed(parsed: IncomingEmail, config: EmailConfig): Promise
       defaultCategoriaId,
       resolveRoleId: () => resolveEmailRoleId(prisma),
       autoAssign: async ({ colaId }) => autoAssignAgent(makePrismaAssignmentRepo(prisma), colaId),
+      systemFroms: [config.fromAddress, config.smtpUser].filter((v): v is string => Boolean(v)),
       log: console.log,
     },
     parsed
@@ -29,6 +31,7 @@ async function ingestParsed(parsed: IncomingEmail, config: EmailConfig): Promise
 
 /** Notifica en la app (agentes) y por correo al(s) implicado(s). */
 async function notifyIngestResult(result: IngestResult): Promise<void> {
+  if (result.kind === 'duplicate' || !result.ticketId) return
   const ticket = await prisma.ticket.findUnique({
     where: { id: result.ticketId },
     include: {
@@ -37,6 +40,8 @@ async function notifyIngestResult(result: IngestResult): Promise<void> {
     },
   })
   if (!ticket) return
+
+  const thread = threadHeadersFromTicket(ticket)
 
   if (result.kind === 'new') {
     const agentes = await prisma.usuario.findMany({
@@ -51,6 +56,7 @@ async function notifyIngestResult(result: IngestResult): Promise<void> {
       to: ticket.solicitante.correo,
       nombre: `${ticket.solicitante.nombre}`,
       data: toTicketEmailData({ ...ticket, descripcion: ticket.descripcion }),
+      ...thread,
     })
     void emitTicketUpdate({ id: ticket.id, codigo: ticket.codigo, asunto: ticket.asunto }, 'nuevo', 'email')
   } else {
@@ -62,6 +68,7 @@ async function notifyIngestResult(result: IngestResult): Promise<void> {
         nombre: ticket.agente.nombre,
         data: toTicketEmailData({ ...ticket, descripcion: ticket.descripcion }),
         comentario: 'El solicitante respondió por correo.',
+        ...thread,
       })
     }
     void emitTicketUpdate({ id: ticket.id, codigo: ticket.codigo, asunto: ticket.asunto }, 'comentario', 'email')
@@ -97,7 +104,7 @@ export async function processIncomingEmails(): Promise<MailCheckStatus> {
 export async function processIncomingEmail(parsed: IncomingEmail): Promise<IngestResult | null> {
   const config = await loadEmailConfig()
   const result = await ingestParsed(parsed, config)
-  if (result) await notifyIngestResult(result)
+  if (result && result.kind !== 'duplicate' && result.ticketId) await notifyIngestResult(result)
   return result
 }
 
@@ -144,6 +151,7 @@ export async function sendEmailReply(ticketId: string, message: string) {
     nombre: ticket.solicitante.nombre,
     data: toTicketEmailData({ ...ticket, descripcion: ticket.descripcion }),
     comentario: message,
+    ...threadHeadersFromTicket(ticket),
   })
   return true
 }

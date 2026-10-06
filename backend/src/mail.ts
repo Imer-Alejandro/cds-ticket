@@ -25,6 +25,7 @@ async function runCheck(cfg?: EmailConfig): Promise<MailCheckStatus> {
           defaultCategoriaId: categoriaId,
           resolveRoleId: () => resolveEmailRoleId(prisma),
           autoAssign: async ({ colaId }) => autoAssignAgent(makePrismaAssignmentRepo(prisma), colaId),
+          systemFroms: [config.fromAddress, config.smtpUser].filter((v): v is string => Boolean(v)),
           log: console.log,
         },
         parsed as IncomingEmail

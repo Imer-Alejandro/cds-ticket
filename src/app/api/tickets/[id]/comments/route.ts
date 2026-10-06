@@ -2,6 +2,9 @@ import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { getSession } from "@/lib/auth"
 import { hasPermission } from "@/lib/permissions"
+import { createNotification } from "@/lib/notifications"
+import { notifyByEmail } from "@/lib/mail/notify-email"
+import { buildCommentEmailEvents } from "@/lib/mail/comment-email"
 
 export async function POST(
   request: Request,
@@ -52,6 +55,48 @@ export async function POST(
       },
       include: { usuario: { select: { id: true, nombre: true, apellido: true } } },
     })
+
+    // Notificaciones (nunca para comentarios internos): in-app y email con hilo SMTP
+    if (!esInterno) {
+      try {
+        if (ticket.solicitanteId && ticket.solicitanteId !== (session.id as string)) {
+          await createNotification(ticket.solicitanteId, "NUEVO_COMENTARIO", `Nuevo comentario en ${ticket.codigo}`, ticket.id)
+        }
+        if (ticket.agenteId && ticket.agenteId !== (session.id as string)) {
+          await createNotification(ticket.agenteId, "NUEVO_COMENTARIO", `Nuevo comentario en ${ticket.codigo}`, ticket.id)
+        }
+
+        const [solicitante, agente] = await Promise.all([
+          ticket.solicitanteId ? prisma.usuario.findUnique({ where: { id: ticket.solicitanteId } }) : null,
+          ticket.agenteId ? prisma.usuario.findUnique({ where: { id: ticket.agenteId } }) : null,
+        ])
+        const events = buildCommentEmailEvents({
+          ticket,
+          autorId: session.id as string,
+          esInterno: Boolean(esInterno),
+          solicitante: solicitante
+            ? {
+                id: solicitante.id,
+                nombre: `${solicitante.nombre} ${solicitante.apellido}`.trim() || solicitante.nombre,
+                correo: solicitante.correo,
+              }
+            : null,
+          agente: agente
+            ? {
+                id: agente.id,
+                nombre: `${agente.nombre} ${agente.apellido}`.trim() || agente.nombre,
+                correo: agente.correo,
+              }
+            : null,
+          comentario: mensaje,
+        })
+        for (const ev of events) {
+          notifyByEmail(ev)
+        }
+      } catch (e) {
+        console.error("Error notificando comentario:", e)
+      }
+    }
 
     return NextResponse.json(comentario, { status: 201 })
   } catch {

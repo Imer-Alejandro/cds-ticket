@@ -12,6 +12,7 @@ export interface MailCheckStatus {
   folder: string
   found: number
   processed: number
+  duplicates: number
   ignored: number
   errors: number
   baseline: boolean
@@ -69,6 +70,7 @@ export async function runMailCheck(hooks: MailCheckHooks): Promise<MailCheckStat
     folder: '',
     found: 0,
     processed: 0,
+    duplicates: 0,
     ignored: 0,
     errors: 0,
     baseline: false,
@@ -180,6 +182,13 @@ export async function runMailCheck(hooks: MailCheckHooks): Promise<MailCheckStat
             continue
           }
 
+          if (result.kind === 'duplicate') {
+            // Ya se procesó este Message-ID: se marca \Seen y no se notifica.
+            status.duplicates++
+            log(`[Mail] Correo #${seq} duplicado (ya procesado anteriormente); se marca como leído`)
+            continue
+          }
+
           status.processed++
           log(`[Mail] ${result.kind === 'reply' ? 'Respuesta' : 'Ticket'} ${result.codigo} procesado`)
 
@@ -196,7 +205,7 @@ export async function runMailCheck(hooks: MailCheckHooks): Promise<MailCheckStat
         }
       }
 
-      status.message = `${status.processed} procesado(s), ${status.ignored} ignorado(s), ${status.errors} error(es)`
+      status.message = `${status.processed} procesado(s), ${status.duplicates} duplicado(s), ${status.ignored} ignorado(s), ${status.errors} error(es)`
     } finally {
       lock.release()
     }

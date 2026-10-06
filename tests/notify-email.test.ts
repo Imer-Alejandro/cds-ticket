@@ -39,6 +39,28 @@ describe('buildEmailMessage', () => {
     expect(msg.html).toContain('Revisando ahora')
     expect(msg.subject).toContain('comentario en')
   })
+
+  it('propaga las cabeceras de hilo (In-Reply-To y References) al mensaje', () => {
+    const ev: EmailEvent = {
+      type: 'NUEVO_COMENTARIO',
+      to: 'juan@x.com',
+      nombre: 'Juan',
+      data,
+      comentario: 'Respuesta',
+      inReplyTo: '<previo@mail>',
+      references: '<raiz@mail> <previo@mail>',
+    }
+    const msg = buildEmailMessage(ev)
+    expect(msg.inReplyTo).toBe('<previo@mail>')
+    expect(msg.references).toBe('<raiz@mail> <previo@mail>')
+  })
+
+  it('sin cabeceras de hilo los campos quedan undefined (los mensajes viejos siguen válidos)', () => {
+    const ev: EmailEvent = { type: 'TICKET_CREADO', to: 'juan@x.com', nombre: 'Juan', data }
+    const msg = buildEmailMessage(ev)
+    expect(msg.inReplyTo).toBeUndefined()
+    expect(msg.references).toBeUndefined()
+  })
 })
 
 describe('toTicketEmailData', () => {
