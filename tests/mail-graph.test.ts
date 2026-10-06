@@ -104,10 +104,10 @@ afterEach(() => {
 })
 
 describe('sendEmailViaGraph', () => {
-  it('envía el mensaje a /me/sendMail con destinatario, cuerpo HTML y guardado en Elementos enviados', async () => {
+  it('envía mensaje nuevo a /me/sendMail cuando no hay código de ticket', async () => {
     const calls = stubFetch({ status: 202, body: {} })
 
-    await sendEmailViaGraph(baseConfig(), 'AT_G', {
+    await sendEmailViaGraph('AT_G', {
       to: 'cliente@empresa.com',
       subject: 'Reunión semanal',
       html: '<p>Hola</p>',
@@ -124,48 +124,66 @@ describe('sendEmailViaGraph', () => {
     expect(body.message?.body).toEqual({ contentType: 'HTML', content: '<p>Hola</p>' })
     expect(body.message?.toRecipients).toEqual([{ emailAddress: { address: 'cliente@empresa.com' } }])
     expect(body.message?.internetMessageHeaders).toBeUndefined()
+    expect(headerValue(body, 'In-Reply-To')).toBeUndefined()
   })
 
-  it('incluye In-Reply-To y References con ángulos cuando el asunto tiene código de ticket', async () => {
-    const calls = stubFetch({ status: 202, body: {} })
+  it('responde con createReply cuando el mensaje del hilo existe en el buzón', async () => {
+    const calls = stubFetch(
+      { body: { value: [{ id: 'GRAPH-MSG-1' }] } },
+      { status: 201, body: { id: 'BORRADOR-1' } },
+      { status: 202, body: {} },
+    )
 
-    await sendEmailViaGraph(baseConfig(), 'AT_G', {
+    await sendEmailViaGraph('AT_G', {
       to: 'cliente@empresa.com',
       subject: '[TK-99999] Re: consulta',
       html: '<p>Respuesta</p>',
       headers: { inReplyTo: 'abc@correo', references: 'raiz@correo abc@correo' },
     })
 
-    const body = parsedBody(calls[0])
-    expect(headerValue(body, 'In-Reply-To')).toBe('<abc@correo>')
-    expect(headerValue(body, 'References')).toBe('<raiz@correo> <abc@correo>')
+    expect(calls).toHaveLength(3)
+    // Lookup por internetMessageId con los ángulos codificados para OData.
+    expect(calls[0].url).toContain("internetMessageId eq '%3Cabc%40correo%3E'")
+    expect(calls[1].url).toBe('https://graph.microsoft.com/v1.0/me/messages/GRAPH-MSG-1/createReply')
+    expect(calls[1].method).toBe('POST')
+
+    const draft = parsedBody(calls[1])
+    expect(draft.message?.subject).toBe('[TK-99999] Re: consulta')
+    expect(draft.message?.body).toEqual({ contentType: 'HTML', content: '<p>Respuesta</p>' })
+    expect(draft.message?.toRecipients).toEqual([{ emailAddress: { address: 'cliente@empresa.com' } }])
+    expect(draft.message?.internetMessageHeaders).toBeUndefined()
+
+    expect(calls[2].url).toBe('https://graph.microsoft.com/v1.0/me/messages/BORRADOR-1/send')
   })
 
-  it('usa la raíz sintética del ticket cuando no hay padre de conversación', async () => {
-    const calls = stubFetch({ status: 202, body: {} })
+  it('si el mensaje del hilo no está en el buzón envía sin encadenar y lo advierte', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const calls = stubFetch({ body: { value: [] } }, { status: 202, body: {} })
 
-    await sendEmailViaGraph(baseConfig(), 'AT_G', {
+    await sendEmailViaGraph('AT_G', {
       to: 'cliente@empresa.com',
       subject: '[TK-12345] Acuse',
       html: '<p>Acuse</p>',
+      headers: { inReplyTo: 'tk-12345-root@empresa.com' },
     })
 
-    const body = parsedBody(calls[0])
-    expect(headerValue(body, 'In-Reply-To')).toBe('<tk-12345-root@empresa.com>')
-    expect(headerValue(body, 'References')).toContain('<tk-12345-root@empresa.com>')
+    expect(calls).toHaveLength(2)
+    expect(calls[1].url).toBe('https://graph.microsoft.com/v1.0/me/sendMail')
+    expect(parsedBody(calls[1]).message?.internetMessageHeaders).toBeUndefined()
+    expect(console.warn).toHaveBeenCalled()
   })
 
-  it('sin código de ticket no agrega cabeceras de hilo', async () => {
+  it('con código de ticket pero sin cabeceras de hilo no busca y envía directo', async () => {
     const calls = stubFetch({ status: 202, body: {} })
 
-    await sendEmailViaGraph(baseConfig(), 'AT_G', {
+    await sendEmailViaGraph('AT_G', {
       to: 'cliente@empresa.com',
-      subject: 'Recordatorio de reunión',
-      html: '<p>…</p>',
-      headers: { inReplyTo: 'abc@correo' },
+      subject: '[TK-11111] Notificación',
+      html: '<p>x</p>',
     })
 
-    expect(parsedBody(calls[0]).message?.internetMessageHeaders).toBeUndefined()
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toContain('/sendMail')
   })
 
   it('propaga el error que devuelve Microsoft Graph', async () => {
@@ -176,8 +194,24 @@ describe('sendEmailViaGraph', () => {
     })
 
     await expect(
-      sendEmailViaGraph(baseConfig(), 'AT_G', { to: 'a@b.c', subject: 'x', html: '<p>x</p>' }),
+      sendEmailViaGraph('AT_G', { to: 'a@b.c', subject: 'x', html: '<p>x</p>' }),
     ).rejects.toThrow(/403 ErrorInsufficientPrivileges.*No tiene permiso Mail\.Send/)
+  })
+
+  it('propaga el fallo al crear el borrador de respuesta', async () => {
+    stubFetch(
+      { body: { value: [{ id: 'GRAPH-MSG-1' }] } },
+      { ok: false, status: 403, body: { error: { code: 'ErrorAccessDenied', message: 'Falta Mail.ReadWrite' } } },
+    )
+
+    await expect(
+      sendEmailViaGraph('AT_G', {
+        to: 'a@b.c',
+        subject: '[TK-22222] x',
+        html: '<p>x</p>',
+        headers: { inReplyTo: 'abc@correo' },
+      }),
+    ).rejects.toThrow(/403 ErrorAccessDenied/)
   })
 })
 
@@ -192,6 +226,7 @@ describe('getMicrosoftGraphAccessToken', () => {
     const scope = new URLSearchParams(String(calls[0].body)).get('scope')
     expect(scope).toBe(GRAPH_SCOPES)
     expect(scope).toContain('https://graph.microsoft.com/Mail.Send')
+    expect(scope).toContain('https://graph.microsoft.com/Mail.ReadWrite')
     expect(onSave).toHaveBeenCalledWith('RT_NUEVO')
   })
 
@@ -213,10 +248,11 @@ describe('getMicrosoftGraphAccessToken', () => {
 })
 
 describe('microsoftAuthorizationUrl', () => {
-  it('incluye Mail.Send en la autorización para concederlo al conectar', () => {
+  it('incluye los permisos de Graph en la autorización para concederlos al conectar', () => {
     const url = microsoftAuthorizationUrl(baseConfig(), 'http://localhost:3000/cb', 'st', 'no', 'soporte@empresa.com')
 
     expect(url).toContain(encodeURIComponent('https://graph.microsoft.com/Mail.Send'))
+    expect(url).toContain(encodeURIComponent('https://graph.microsoft.com/Mail.ReadWrite'))
     expect(url).toContain(encodeURIComponent('https://outlook.office.com/IMAP.AccessAsUser.All'))
   })
 })

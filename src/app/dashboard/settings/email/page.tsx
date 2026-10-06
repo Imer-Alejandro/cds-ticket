@@ -375,7 +375,7 @@ function ConfigurationGuide() {
             <li>Autenticación IMAP: Microsoft 365 OAuth2; el usuario y contraseña puede estar deshabilitado por Microsoft.</li>
             <li>IMAP: <code className="bg-white px-1 rounded">outlook.office365.com</code>, puerto 993, SSL/TLS activado.</li>
             <li>SMTP: <code className="bg-white px-1 rounded">smtp.office365.com</code>, puerto 587, SSL directo deshabilitado (STARTTLS).</li>
-            <li>La aplicación de Entra ID necesita permisos delegados IMAP.AccessAsUser.All, SMTP.Send y Mail.Send (Graph, para enviar).</li>
+            <li>La aplicación de Entra ID necesita permisos delegados IMAP.AccessAsUser.All, SMTP.Send y los de Microsoft Graph: Mail.Send y Mail.ReadWrite (envío y respuestas cuando el tenant bloquea SMTP).</li>
           </ul>
         </div>
         <div className="pt-2 border-t border-blue-200">

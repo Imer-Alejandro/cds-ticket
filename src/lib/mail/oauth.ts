@@ -13,11 +13,14 @@ export const MICROSOFT_SCOPES = [
 /** Permiso delegado de Microsoft Graph necesario para enviar correo (sendMail). */
 export const GRAPH_SEND_SCOPE = 'https://graph.microsoft.com/Mail.Send'
 
+/** Permiso delegado para buscar mensajes y crear borradores de respuesta (createReply). */
+export const GRAPH_READ_WRITE_SCOPE = 'https://graph.microsoft.com/Mail.ReadWrite'
+
 /**
  * Scope del refresh token usado para enviar vía Graph. Es UN scope separado del
- * de IMAP/SMTP para que el monitoreo no dependa de que Mail.Send esté concedido.
+ * de IMAP/SMTP para que el monitoreo no dependa de los permisos de Graph.
  */
-export const GRAPH_SCOPES = ['offline_access', GRAPH_SEND_SCOPE].join(' ')
+export const GRAPH_SCOPES = ['offline_access', GRAPH_READ_WRITE_SCOPE, GRAPH_SEND_SCOPE].join(' ')
 
 const microsoftJwks = createRemoteJWKSet(
   new URL('https://login.microsoftonline.com/common/discovery/v2.0/keys')
@@ -47,9 +50,9 @@ export function microsoftAuthorizationUrl(
     response_type: 'code',
     redirect_uri: redirectUri,
     response_mode: 'query',
-    // Incluye Mail.Send para que "Conectar con Microsoft 365" conceda también
-    // el envío vía Graph; el intercambio/refresh de tokens sigue con scopes IMAP.
-    scope: [MICROSOFT_SCOPES, GRAPH_SEND_SCOPE].join(' '),
+    // Incluye los permisos de Graph para que "Conectar con Microsoft 365"
+    // conceda también el envío y las respuestas; el refresh IMAP no los usa.
+    scope: [MICROSOFT_SCOPES, GRAPH_READ_WRITE_SCOPE, GRAPH_SEND_SCOPE].join(' '),
     state,
     nonce,
     login_hint: loginHint,
@@ -139,7 +142,7 @@ export async function getMicrosoftGraphAccessToken(
     const message = error instanceof Error ? error.message : String(error)
     if (/AADSTS65001|AADSTS65000|AADSTS65005|AADSTS700016/.test(message)) {
       throw new Error(
-        `${message} — La aplicación necesita el permiso delegado Mail.Send: agrégalo en Entra ID (Permisos de API > Mail.Send > otorgar consentimiento) o vuelve a conectar Microsoft 365 desde Ajustes > Correo.`,
+        `${message} — La aplicación necesita los permisos delegados Mail.Send y Mail.ReadWrite de Microsoft Graph: agrégalos en Entra ID (Permisos de API > otorgar consentimiento) o vuelve a conectar Microsoft 365 desde Ajustes > Correo.`,
       )
     }
     throw error

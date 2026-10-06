@@ -26,7 +26,7 @@ export async function sendEmail(
 
   if (config.authMode === 'oauth2') {
     const accessToken = await getMicrosoftGraphAccessToken(config, async (refreshToken) => { await saveEmailConfig({ refreshToken }) })
-    await sendEmailViaGraph(config, accessToken, { to, subject, html, headers })
+    await sendEmailViaGraph(accessToken, { to, subject, html, headers })
     return
   }
 
