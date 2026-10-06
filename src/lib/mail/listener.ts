@@ -1,100 +1,23 @@
-import { ImapFlow } from 'imapflow'
-import { simpleParser } from 'mailparser'
 import prisma from '@/lib/prisma'
-import { loadEmailConfig } from './config'
+import { loadEmailConfig, type EmailConfig } from './config'
 import { resolveEmailCategoriaId, resolveEmailRoleId } from './helpers'
-import { handleIncomingEmail } from './ingest'
-import { createNotification } from '@/lib/notifications'
+import { handleIncomingEmail, type IngestResult, type IncomingEmail, type TicketRepo } from './ingest'
+import { runMailCheck, configPersistence, type MailCheckStatus } from './check'
+import { createNotification, emitTicketUpdate } from '@/lib/notifications'
 import { notifyByEmail, toTicketEmailData } from './notify-email'
-import { emitTicketUpdate } from '@/lib/notifications'
 import { autoAssignAgent } from '@/lib/assignment'
 import { makePrismaAssignmentRepo } from '@/lib/assignment-prisma'
 
-let intervalHandle: ReturnType<typeof setInterval> | null = null
-let processing = false
+let timerHandle: ReturnType<typeof setTimeout> | null = null
+let stopped = true
+let inFlight: Promise<MailCheckStatus> | null = null
 
-export async function processIncomingEmails() {
-  if (processing) return
-  processing = true
-  let client: ImapFlow | null = null
-  try {
-    const config = await loadEmailConfig()
-
-    if (!config.enabled) {
-      console.log('Email processing is disabled')
-      return
-    }
-
-    if (!config.imapHost || !config.imapUser || !config.imapPass) {
-      console.error('IMAP configuration incomplete')
-      return
-    }
-
-    client = new ImapFlow({
-      host: config.imapHost,
-      port: config.imapPort,
-      secure: config.imapSecure,
-      auth: { user: config.imapUser, pass: config.imapPass },
-      logger: false,
-    })
-
-    await client.connect()
-    const mailbox = await client.mailboxOpen(config.imapFolder)
-    console.log(`Mailbox opened: ${config.imapFolder}, messages: ${mailbox.exists}`)
-
-    const searchResult = await client.search({ seen: false })
-    const messages: number[] = searchResult || []
-    const fallbackMessages: number[] = !messages.length ? ((await client.search({ seen: false })) || []) : []
-    const finalMessages = messages.length ? messages : fallbackMessages
-
-    if (finalMessages.length === 0) {
-      console.log('No unread messages found')
-      await client.logout()
-      return
-    }
-
-    for (let i = Math.max(0, finalMessages.length - 20); i < finalMessages.length; i++) {
-      const message = finalMessages[i]
-      try {
-        const msg = await client.fetchOne(message, { source: true })
-        if (msg && 'source' in msg && msg.source) {
-          const parsed = await simpleParser(msg.source)
-          await processIncomingEmail(parsed)
-          await client.messageFlagsAdd(message, ['\\Seen'])
-        }
-      } catch (error) {
-        console.error(`Error processing message ${message}:`, error)
-      }
-    }
-
-    await client.logout()
-  } catch (error) {
-    console.error('Error processing emails:', error)
-  } finally {
-    if (client) {
-      try {
-        await client.logout()
-      } catch {
-        // ignorar
-      }
-    }
-    processing = false
-  }
-}
-
-/**
- * Procesa un correo ya parseado: decide entre ticket nuevo o respuesta,
- * crea/vincula el ticket y dispara notificaciones en app + email.
- * Exportado para ser reutilizado por el backend (unificación)
- * y para tests de integración.
- */
-export async function processIncomingEmail(parsed: any) {
-  const config = await loadEmailConfig()
-  const defaultCategoriaId = await resolveEmailCategoriaId({ defaultCategoriaId: config.defaultCategoriaId } as any, prisma) ?? undefined
-
-  const result = await handleIncomingEmail(
+/** Ingresa un correo parseado (ticket nuevo o respuesta) sin notificar. */
+async function ingestParsed(parsed: IncomingEmail, config: EmailConfig): Promise<IngestResult | null> {
+  const defaultCategoriaId = (await resolveEmailCategoriaId(config, prisma)) ?? undefined
+  return handleIncomingEmail(
     {
-      repo: prisma as any,
+      repo: prisma as unknown as TicketRepo,
       defaultCategoriaId,
       resolveRoleId: () => resolveEmailRoleId(prisma),
       autoAssign: async ({ colaId }) => autoAssignAgent(makePrismaAssignmentRepo(prisma), colaId),
@@ -102,9 +25,10 @@ export async function processIncomingEmail(parsed: any) {
     },
     parsed
   )
+}
 
-  if (!result) return null
-
+/** Notifica en la app (agentes) y por correo al(s) implicado(s). */
+async function notifyIngestResult(result: IngestResult): Promise<void> {
   const ticket = await prisma.ticket.findUnique({
     where: { id: result.ticketId },
     include: {
@@ -112,10 +36,9 @@ export async function processIncomingEmail(parsed: any) {
       agente: { select: { id: true, nombre: true, correo: true } },
     },
   })
-  if (!ticket) return result
+  if (!ticket) return
 
   if (result.kind === 'new') {
-    // Notificar a agentes en la app
     const agentes = await prisma.usuario.findMany({
       where: { rol: { nombre: { in: ['Agente', 'Administrador'] } } },
       select: { id: true },
@@ -123,7 +46,6 @@ export async function processIncomingEmail(parsed: any) {
     for (const agente of agentes) {
       await createNotification(agente.id, 'NUEVO_TICKET', `Nuevo ticket ${ticket.codigo}: ${ticket.asunto}`, ticket.id)
     }
-    // Email de acuse al solicitante
     notifyByEmail({
       type: 'TICKET_CREADO',
       to: ticket.solicitante.correo,
@@ -132,7 +54,6 @@ export async function processIncomingEmail(parsed: any) {
     })
     void emitTicketUpdate({ id: ticket.id, codigo: ticket.codigo, asunto: ticket.asunto }, 'nuevo', 'email')
   } else {
-    // Respuesta: notificar al agente asignado (in-app + email)
     if (ticket.agente) {
       await createNotification(ticket.agente.id, 'NUEVO_COMENTARIO', `Nuevo comentario en ${ticket.codigo} (por correo)`, ticket.id)
       notifyByEmail({
@@ -145,33 +66,67 @@ export async function processIncomingEmail(parsed: any) {
     }
     void emitTicketUpdate({ id: ticket.id, codigo: ticket.codigo, asunto: ticket.asunto }, 'comentario', 'email')
   }
+}
 
+/**
+ * Revisión única de la bandeja (compatible con password y Microsoft 365 OAuth2).
+ * Filtra el histórico con `monitorAfter` y marca los correos procesados como
+ * leídos. Si ya hay una revisión en curso se reutiliza esa promesa.
+ */
+export async function processIncomingEmails(): Promise<MailCheckStatus> {
+  if (inFlight) return inFlight
+  inFlight = (async () => {
+    const persist = configPersistence(prisma.configuracion)
+    return runMailCheck({
+      loadConfig: loadEmailConfig,
+      ingest: ingestParsed,
+      onResult: notifyIngestResult,
+      ...persist,
+    })
+  })().finally(() => {
+    inFlight = null
+  })
+  return inFlight
+}
+
+/**
+ * Procesa un correo ya parseado: decide entre ticket nuevo o respuesta,
+ * crea/vincula el ticket y dispara notificaciones en app + email.
+ * Compatibilidad con llamadas directas (scripts/tests).
+ */
+export async function processIncomingEmail(parsed: IncomingEmail): Promise<IngestResult | null> {
+  const config = await loadEmailConfig()
+  const result = await ingestParsed(parsed, config)
+  if (result) await notifyIngestResult(result)
   return result
+}
+
+async function runLoop() {
+  let delay = 15
+  try {
+    const cfg = await loadEmailConfig()
+    delay = Math.max(cfg.checkInterval || 15, 5)
+  } catch (err) {
+    console.error('[Mail] No se pudo leer la configuración de correo:', err)
+  }
+  await processIncomingEmails()
+  if (!stopped) {
+    timerHandle = setTimeout(() => void runLoop(), delay * 1000)
+  }
 }
 
 export function startMailListener() {
   stopMailListener()
-
-  void loadEmailConfig().then((config) => {
-    if (!config.enabled) {
-      console.log('Email processing is disabled')
-      return
-    }
-
-    void processIncomingEmails()
-    intervalHandle = setInterval(() => {
-      void processIncomingEmails()
-    }, Math.max(config.checkInterval, 5) * 1000)
-    console.log(`[Mail] Listener iniciado con intervalo de ${Math.max(config.checkInterval, 5)} segundos`)
-  }).catch((error) => {
-    console.error('Error iniciando listener de correo:', error)
-  })
+  stopped = false
+  console.log('[Mail] Listener iniciado; relee la configuración en cada ciclo')
+  void runLoop()
 }
 
 export function stopMailListener() {
-  if (intervalHandle) {
-    clearInterval(intervalHandle)
-    intervalHandle = null
+  stopped = true
+  if (timerHandle) {
+    clearTimeout(timerHandle)
+    timerHandle = null
   }
 }
 

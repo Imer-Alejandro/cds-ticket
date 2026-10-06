@@ -19,12 +19,16 @@ export async function POST(req: NextRequest) {
     }
 
     // Procesar correos
-    await processIncomingEmails()
+    const status = await processIncomingEmails()
 
-    return NextResponse.json({
-      success: true,
-      message: 'Email processing completed',
-    })
+    return NextResponse.json(
+      {
+        success: status.ok,
+        message: status.ok ? 'Email processing completed' : 'Email processing failed',
+        status,
+      },
+      { status: status.ok ? 200 : 503 }
+    )
   } catch (error) {
     console.error('Error in email processing endpoint:', error)
     return NextResponse.json(

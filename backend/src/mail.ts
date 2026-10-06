@@ -1,5 +1,3 @@
-import { ImapFlow } from 'imapflow'
-import { simpleParser } from 'mailparser'
 import { getPrisma } from '../lib/prisma'
 import { loadEmailConfig, type EmailConfig } from '../lib/email-config'
 import { notifyUsers } from './socket'
@@ -7,161 +5,82 @@ import { resolveEmailCategoriaId, resolveEmailRoleId } from '../../src/lib/mail/
 import { handleIncomingEmail, type IncomingEmail, type TicketRepo } from '../../src/lib/mail/ingest'
 import { autoAssignAgent } from '../../src/lib/assignment'
 import { makePrismaAssignmentRepo } from '../../src/lib/assignment-prisma'
-import { getMicrosoftAccessToken } from '../../src/lib/mail/oauth'
+import { runMailCheck, configPersistence, type MailCheckStatus } from '../../src/lib/mail/check'
 
-let intervalHandle: ReturnType<typeof setInterval> | null = null
-let processing = false
+let timerHandle: ReturnType<typeof setTimeout> | null = null
+let stopped = true
+let inFlight: Promise<MailCheckStatus> | null = null
 
-export async function checkMail(cfg?: EmailConfig) {
-  if (processing) return
-  processing = true
+async function runCheck(cfg?: EmailConfig): Promise<MailCheckStatus> {
   const prisma = getPrisma()
-  let client: ImapFlow | null = null
+  const persist = configPersistence(prisma.configuracion)
 
-  try {
-    const config = cfg || (await loadEmailConfig())
-    if (!config.enabled || !config.imapHost || !config.imapUser) return
-
-    if (
-      config.authMode === 'oauth2' &&
-      config.oauthMailbox.trim().toLowerCase() !== config.imapUser.trim().toLowerCase()
-    ) {
-      console.error('[Mail] La cuenta autorizada en Microsoft 365 no coincide con Usuario IMAP. Vuelve a conectar esa misma cuenta.')
-      return
-    }
-
-    if (config.authMode === 'oauth2' && !config.monitorAfter) {
-      config.monitorAfter = new Date().toISOString()
-      await prisma.configuracion.upsert({
-        where: { clave: 'email_monitorAfter' },
-        update: { valor: config.monitorAfter },
-        create: { clave: 'email_monitorAfter', valor: config.monitorAfter, grupo: 'email' },
-      })
-      console.log('[Mail] Punto inicial de monitoreo establecido; el histórico no se importará')
-      return
-    }
-
-    const accessToken = config.authMode === 'oauth2' ? await getMicrosoftAccessToken(config) : null
-    if (config.authMode !== 'oauth2' && !config.imapPass) return
-
-    client = new ImapFlow({
-      host: config.imapHost,
-      port: config.imapPort,
-      secure: config.imapSecure,
-      auth: accessToken ? { user: config.imapUser, accessToken } : { user: config.imapUser, pass: config.imapPass },
-      logger: false,
-    })
-
-    await client.connect()
-    const lock = await client.getMailboxLock(config.imapFolder)
-    try {
-      const monitorAfter = config.authMode === 'oauth2'
-        ? new Date(config.monitorAfter)
-        : null
-      const candidates = ((await client.search({
-        seen: false,
-        ...(monitorAfter ? { since: monitorAfter } : {}),
-      })) || []) as number[]
-      const metadata = candidates.length
-        ? await client.fetchAll(candidates, { internalDate: true })
-        : []
-      const msgs = metadata
-        .filter(message =>
-          !monitorAfter || (message.internalDate && message.internalDate >= monitorAfter)
-        )
-        .map(message => message.seq)
-      const historicCount = candidates.length - msgs.length
-      if (historicCount) {
-        console.log(`[Mail] ${historicCount} correo(s) histórico(s) sin leer omitido(s)`)
-      }
-      if (!msgs.length) {
-        console.log(`[Mail] Sin correos no leídos en ${config.imapFolder}; siguiente revisión en ${config.checkInterval || 10} segundos`)
-        return
-      }
-      console.log(`[Mail] ${msgs.length} correo(s) no leído(s) encontrado(s) en ${config.imapFolder}`)
-
+  return runMailCheck({
+    loadConfig: async () => cfg ?? (await loadEmailConfig()),
+    ingest: async (parsed, config) => {
       const categoriaId = (await resolveEmailCategoriaId(config, prisma)) || undefined
-
-      for (const seq of msgs) {
-        try {
-          const raw = await client.download(String(seq))
-          const chunks: Buffer[] = []
-          for await (const chunk of raw.content) {
-            chunks.push(Buffer.from(chunk))
-          }
-          const parsed = await simpleParser(Buffer.concat(chunks))
-
-          const resultIngest = await handleIncomingEmail(
-            {
-              repo: prisma as unknown as TicketRepo,
-              defaultCategoriaId: categoriaId,
-              resolveRoleId: () => resolveEmailRoleId(prisma),
-              autoAssign: async ({ colaId }) => autoAssignAgent(makePrismaAssignmentRepo(prisma), colaId),
-              log: console.log,
-            },
-            parsed as unknown as IncomingEmail
-          )
-
-          if (!resultIngest) continue
-
-          await client.messageFlagsAdd(seq, ['\\Seen'])
-
-          console.log(`[Mail] ${resultIngest.kind === 'reply' ? 'Respuesta' : 'Ticket'} ${resultIngest.codigo} procesado`)
-
-          // Notificar a los agentes por socket en tiempo real
-          const agentes = await prisma.usuario.findMany({
-            where: { rol: { nombre: { in: ['Agente', 'Administrador'] } } },
-            select: { id: true },
-          })
-          notifyUsers(
-            agentes.map(a => a.id),
-            resultIngest.kind === 'reply' ? 'ticketUpdated' : 'nuevoTicket',
-            { ticket: { id: resultIngest.ticketId, codigo: resultIngest.codigo } }
-          )
-        } catch (err) {
-          console.error('[Mail] Error procesando correo:', err)
-        }
-      }
-    } finally {
-      lock.release()
-    }
-  } catch (err) {
-    console.error('[Mail] Error de conexión IMAP:', err)
-  } finally {
-    if (client) {
-      try {
-        await client.logout()
-      } catch {
-        // ignorar errores de cierre de conexión
-      }
-    }
-    processing = false
-  }
-}
-
-export function startMailListener(cfg?: EmailConfig) {
-  stopMailListener()
-
-  if (cfg) {
-    if (cfg.enabled) {
-      checkMail(cfg)
-      intervalHandle = setInterval(() => checkMail(cfg), (cfg.checkInterval || 10) * 1000)
-      console.log('[Mail] Listener iniciado con intervalo de', cfg.checkInterval || 10, 'segundos')
-    }
-    return
-  }
-
-  loadEmailConfig().then((c) => {
-    void checkMail(c)
-    intervalHandle = setInterval(() => void checkMail(), Math.max(c.checkInterval || 10, 5) * 1000)
-    console.log('[Mail] Listener iniciado con intervalo de', Math.max(c.checkInterval || 10, 5), 'segundos')
+      return handleIncomingEmail(
+        {
+          repo: prisma as unknown as TicketRepo,
+          defaultCategoriaId: categoriaId,
+          resolveRoleId: () => resolveEmailRoleId(prisma),
+          autoAssign: async ({ colaId }) => autoAssignAgent(makePrismaAssignmentRepo(prisma), colaId),
+          log: console.log,
+        },
+        parsed as IncomingEmail
+      )
+    },
+    onResult: async (result) => {
+      const agentes = await prisma.usuario.findMany({
+        where: { rol: { nombre: { in: ['Agente', 'Administrador'] } } },
+        select: { id: true },
+      })
+      notifyUsers(
+        agentes.map(a => a.id),
+        result.kind === 'reply' ? 'ticketUpdated' : 'nuevoTicket',
+        { ticket: { id: result.ticketId, codigo: result.codigo } }
+      )
+    },
+    ...persist,
   })
 }
 
+/** Revisión de bandeja; si ya hay una en curso se reutiliza esa promesa. */
+export function checkMail(cfg?: EmailConfig): Promise<MailCheckStatus> {
+  if (inFlight) return inFlight
+  inFlight = runCheck(cfg).finally(() => {
+    inFlight = null
+  })
+  return inFlight
+}
+
+async function runLoop() {
+  let cfg: EmailConfig | undefined
+  let delay = 15
+  try {
+    cfg = await loadEmailConfig()
+    delay = Math.max(cfg.checkInterval || 15, 5)
+  } catch (err) {
+    console.error('[Mail] No se pudo leer la configuración de correo:', err)
+  }
+  await checkMail(cfg)
+  if (!stopped) {
+    timerHandle = setTimeout(() => void runLoop(), delay * 1000)
+  }
+}
+
+export function startMailListener() {
+  stopMailListener()
+  stopped = false
+  console.log('[Mail] Listener iniciado; relee la configuración en cada ciclo')
+  void runLoop()
+}
+
 export function stopMailListener() {
-  if (intervalHandle) {
-    clearInterval(intervalHandle)
-    intervalHandle = null
+  stopped = true
+  if (timerHandle) {
+    clearTimeout(timerHandle)
+    timerHandle = null
     console.log('[Mail] Listener detenido')
   }
 }

@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer'
-import { loadEmailConfig } from './config'
+import { loadEmailConfig, saveEmailConfig } from './config'
 import { createOutbox, type EmailMessage, type EmailOutboxInstance } from './outbox'
 import { extractTicketCode } from './core'
 import { getMicrosoftAccessToken } from './oauth'
@@ -19,7 +19,9 @@ export async function sendEmail(
   const config = await loadEmailConfig()
   if (!config.smtpHost || !config.fromAddress) return
 
-  const accessToken = config.authMode === 'oauth2' ? await getMicrosoftAccessToken(config) : null
+  const accessToken = config.authMode === 'oauth2'
+    ? await getMicrosoftAccessToken(config, async (refreshToken) => { await saveEmailConfig({ refreshToken }) })
+    : null
 
   const transporter = nodemailer.createTransport({
     host: config.smtpHost,

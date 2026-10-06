@@ -102,7 +102,15 @@ export async function verifyMicrosoftMailbox(
   return expectedMailbox.trim().toLowerCase()
 }
 
-export async function getMicrosoftAccessToken(config: EmailConfig) {
+/**
+ * Intercambia el refresh token por un access token. Microsoft puede ROTAR el
+ * refresh token en cada uso: si llega uno nuevo se persiste vía
+ * `onRefreshToken` para que la siguiente revisión no falle en silencio.
+ */
+export async function getMicrosoftAccessToken(
+  config: EmailConfig,
+  onRefreshToken?: (refreshToken: string) => Promise<void>,
+) {
   if (!config.clientId || !config.clientSecret || !config.refreshToken) {
     throw new Error('Configura MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID y MICROSOFT_CLIENT_SECRET, y vuelve a conectar Microsoft 365')
   }
@@ -113,5 +121,13 @@ export async function getMicrosoftAccessToken(config: EmailConfig) {
     refresh_token: config.refreshToken,
     scope: MICROSOFT_SCOPES,
   }))
+  if (token.refresh_token && token.refresh_token !== config.refreshToken && onRefreshToken) {
+    try {
+      await onRefreshToken(token.refresh_token)
+    } catch {
+      // No fallar la revisión por no poder persistir el token rotado;
+      // el siguiente ciclo reintentará con el refresh token guardado.
+    }
+  }
   return token.access_token
 }

@@ -4,9 +4,43 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowLeft, Mail, Loader2, ChevronRight, CheckCircle2, AlertCircle } from "lucide-react"
+import { ArrowLeft, Mail, Loader2, ChevronRight, CheckCircle2, AlertCircle, AlertTriangle, Info } from "lucide-react"
 import Link from "next/link"
 import { apiFetch } from "@/lib/api"
+
+interface EmailCheckStatus {
+  at: string
+  ok: boolean
+  message: string
+  folder: string
+  found: number
+  processed: number
+  ignored: number
+  errors: number
+  baseline: boolean
+}
+
+interface EmailStatus {
+  last: EmailCheckStatus | null
+  stale: boolean
+  ageMs: number | null
+  interval: number
+  enabled: boolean
+  authMode: 'password' | 'oauth2'
+  oauthMailbox: string
+  hasRefreshToken: boolean
+  monitorAfter: string | null
+}
+
+function haceTexto(iso: string) {
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000))
+  if (s < 60) return `hace ${s}s`
+  const m = Math.round(s / 60)
+  if (m < 60) return `hace ${m} min`
+  const h = Math.round(m / 60)
+  if (h < 48) return `hace ${h} h`
+  return `hace ${Math.round(h / 24)} días`
+}
 
 export default function EmailSettingsPage() {
   const router = useRouter()
@@ -16,6 +50,7 @@ export default function EmailSettingsPage() {
   const [testMessage, setTestMessage] = useState('')
   const [oauthConfigured, setOauthConfigured] = useState(false)
   const [oauthMailbox, setOauthMailbox] = useState('')
+  const [status, setStatus] = useState<EmailStatus | null>(null)
   const [form, setForm] = useState({
     authMode: 'password' as 'password' | 'oauth2',
     enabled: false,
@@ -49,6 +84,34 @@ export default function EmailSettingsPage() {
     }).finally(() => setLoading(false))
   }, [])
 
+  useEffect(() => {
+    let alive = true
+    const loadStatus = () => {
+      apiFetch('/api/settings/email/status')
+        .then(r => (r.ok ? r.json() : null))
+        .then(s => { if (alive && s) setStatus(s) })
+        .catch(() => { /* sin estado disponible */ })
+    }
+    loadStatus()
+    const id = setInterval(loadStatus, 30000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  const handleAuthModeChange = (mode: 'password' | 'oauth2') => {
+    setForm(prev => {
+      const next = { ...prev, authMode: mode }
+      if (mode === 'oauth2') {
+        next.imapHost = 'outlook.office365.com'
+        next.imapPort = '993'
+        next.imapSecure = true
+        next.smtpHost = 'smtp.office365.com'
+        next.smtpPort = '587'
+        next.smtpSecure = false
+      }
+      return next
+    })
+  }
+
   const handleSave = async () => {
     setSaving(true); setTestResult(null); setTestMessage('')
     try {
@@ -65,7 +128,8 @@ export default function EmailSettingsPage() {
     setSaving(true); setTestResult(null); setTestMessage('')
     try {
       const res = await apiFetch('/api/settings/email', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, authMode: 'oauth2', enabled: true }),
       })
       if (!res.ok) throw new Error('No se pudo guardar la configuración OAuth2')
       window.location.href = '/api/settings/email/oauth/start'
@@ -116,6 +180,8 @@ export default function EmailSettingsPage() {
         </div>
       )}
 
+      <StatusBanner status={status} />
+
       <div className="grid gap-6 lg:grid-cols-2">
         {/* IMAP */}
         <Card className="rounded-2xl border-border/50 shadow-sm">
@@ -129,7 +195,7 @@ export default function EmailSettingsPage() {
               <span>Activar recepción automática de correos</span>
             </label>
             <Field label="Autenticación">
-              <select value={form.authMode} onChange={e => setForm({ ...form, authMode: e.target.value as 'password' | 'oauth2' })}
+              <select value={form.authMode} onChange={e => handleAuthModeChange(e.target.value as 'password' | 'oauth2')}
                 className="flex h-10 w-full rounded-xl border border-input bg-transparent px-3 text-sm"
               >
                 <option value="password">Usuario y contraseña</option>
@@ -207,6 +273,61 @@ export default function EmailSettingsPage() {
       </div>
 
       <ConfigurationGuide />
+    </div>
+  )
+}
+
+function StatusBanner({ status }: { status: EmailStatus | null }) {
+  if (!status) return null
+
+  if (!status.enabled) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <AlertTriangle className="h-5 w-5 shrink-0" />
+        Recepción desactivada: marca “Activar recepción automática de correos” y guarda para que el sistema monitoree la bandeja.
+      </div>
+    )
+  }
+
+  if (!status.last) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+        <Info className="h-5 w-5 shrink-0" /> Aún no hay revisiones de bandeja registradas. Si el backend está corriendo aparecerá aquí en unos segundos.
+      </div>
+    )
+  }
+
+  if (!status.last.ok) {
+    return (
+      <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <AlertCircle className="h-5 w-5 shrink-0" />
+        <span>
+          Última revisión {haceTexto(status.last.at)} con error: {status.last.message}
+        </span>
+      </div>
+    )
+  }
+
+  if (status.stale) {
+    return (
+      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <AlertTriangle className="h-5 w-5 shrink-0" />
+        <span>
+          Última revisión {haceTexto(status.last.at)} y no hay revisiones recientes. Revisa que el backend esté corriendo
+          (<code className="rounded bg-white px-1">npm run dev</code> o <code className="rounded bg-white px-1">npm run start:backend</code>).
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+      <CheckCircle2 className="h-5 w-5 shrink-0" />
+      <span>
+        Última revisión {haceTexto(status.last.at)} en <strong>{status.last.folder || 'INBOX'}</strong>:{' '}
+        {status.last.processed} procesado(s), {status.last.ignored} ignorado(s), {status.last.errors} error(es).
+        {status.last.baseline ? ' Se estableció el punto inicial: el histórico no se importa.' : ` ${status.last.message}`}
+      </span>
     </div>
   )
 }
