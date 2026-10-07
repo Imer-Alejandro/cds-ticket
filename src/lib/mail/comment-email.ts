@@ -1,4 +1,5 @@
 import { toTicketEmailData, type EmailEvent, type EmailThreadHeaders } from './notify-email'
+import type { EmailAttachment } from './outbox'
 
 export interface CommentRecipient {
   id: string
@@ -28,6 +29,8 @@ export interface CommentNotifyInput {
   solicitante?: CommentRecipient | null
   agente?: CommentRecipient | null
   comentario: string
+  /** Adjuntos del comentario (base64) que se envían con el correo. */
+  adjuntos?: EmailAttachment[]
 }
 
 function wrapId(value?: string | null): string | undefined {
@@ -71,6 +74,7 @@ export function buildCommentEmailEvents(input: CommentNotifyInput): EmailEvent[]
 
   const data = toTicketEmailData(input.ticket)
   const thread = threadHeadersFromTicket(input.ticket)
+  const adjuntos = input.adjuntos?.length ? { adjuntos: input.adjuntos } : {}
   const events: EmailEvent[] = []
 
   if (input.solicitante?.correo && input.solicitante.id !== input.autorId) {
@@ -81,6 +85,7 @@ export function buildCommentEmailEvents(input: CommentNotifyInput): EmailEvent[]
       data,
       comentario: input.comentario,
       ...thread,
+      ...adjuntos,
     })
   }
   if (input.agente?.correo && input.agente.id !== input.autorId) {
@@ -91,6 +96,7 @@ export function buildCommentEmailEvents(input: CommentNotifyInput): EmailEvent[]
       data,
       comentario: input.comentario,
       ...thread,
+      ...adjuntos,
     })
   }
   return events

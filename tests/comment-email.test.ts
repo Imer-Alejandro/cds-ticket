@@ -100,6 +100,19 @@ describe('buildCommentEmailEvents', () => {
     expect(events[0].inReplyTo).toBeUndefined()
     expect(events[0].references).toBeUndefined()
   })
+
+  it('propaga los adjuntos del comentario a los eventos', () => {
+    const adjuntos = [{ nombre: 'captura.png', tipo: 'image/png', data: 'QUJD' }]
+    const events = buildCommentEmailEvents(makeInput({ adjuntos }))
+
+    expect(events).toHaveLength(1)
+    expect(events[0].adjuntos).toEqual(adjuntos)
+  })
+
+  it('sin adjuntos los eventos no llevan la clave adjuntos', () => {
+    const events = buildCommentEmailEvents(makeInput())
+    expect(events[0].adjuntos).toBeUndefined()
+  })
 })
 
 describe('threadHeadersFromTicket', () => {

@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer'
 import { loadEmailConfig, saveEmailConfig } from './config'
-import { createOutbox, type EmailMessage, type EmailOutboxInstance } from './outbox'
+import { createOutbox, type EmailAttachment, type EmailMessage, type EmailOutboxInstance } from './outbox'
 import { extractTicketCode } from './core'
 import { getMicrosoftGraphAccessToken } from './oauth'
 import { sendEmailViaGraph } from './graph'
@@ -10,13 +10,15 @@ let outbox: EmailOutboxInstance | null = null
 /**
  * Envía un mensaje real usando la configuración guardada en BD.
  * OAuth2 → Microsoft Graph (el tenant bloquea SMTP AUTH); password → SMTP.
- * Incluye cabeceras de hilo de conversación (In-Reply-To, References, Message-ID).
+ * Incluye cabeceras de hilo de conversación (In-Reply-To, References, Message-ID)
+ * y adjuntos opcionales (base64).
  */
 export async function sendEmail(
   to: string,
   subject: string,
   html: string,
-  headers?: { messageId?: string; inReplyTo?: string; references?: string }
+  headers?: { messageId?: string; inReplyTo?: string; references?: string },
+  attachments?: EmailAttachment[],
 ): Promise<void> {
   const config = await loadEmailConfig()
   if (!config.fromAddress) {
@@ -26,7 +28,7 @@ export async function sendEmail(
 
   if (config.authMode === 'oauth2') {
     const accessToken = await getMicrosoftGraphAccessToken(config, async (refreshToken) => { await saveEmailConfig({ refreshToken }) })
-    await sendEmailViaGraph(accessToken, { to, subject, html, headers })
+    await sendEmailViaGraph(accessToken, { to, subject, html, headers, attachments })
     return
   }
 
@@ -50,6 +52,14 @@ export async function sendEmail(
     to,
     subject,
     html,
+  }
+
+  if (attachments?.length) {
+    mailOptions.attachments = attachments.map((a) => ({
+      filename: a.nombre,
+      content: Buffer.from(a.data, 'base64'),
+      contentType: a.tipo,
+    }))
   }
 
   if (ticketCode) {
@@ -83,11 +93,11 @@ export async function sendEmail(
 export function enqueueEmail(msg: EmailMessage): void {
   if (!outbox) {
     outbox = createOutbox({
-      send: async ({ to, subject, html, inReplyTo, references }) => {
+      send: async ({ to, subject, html, inReplyTo, references, attachments }) => {
         await sendEmail(to, subject, html, {
           inReplyTo: inReplyTo ?? undefined,
           references: references ?? undefined,
-        })
+        }, attachments)
       },
       enabled: () => true,
     })

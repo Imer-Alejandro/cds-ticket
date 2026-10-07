@@ -67,7 +67,7 @@ async function tokenRequest(config: Pick<EmailConfig, 'tenantId' | 'clientId' | 
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params,
   })
-  const body = await response.json() as { access_token?: string; refresh_token?: string; id_token?: string; error?: string; error_description?: string }
+  const body = await response.json() as { access_token?: string; refresh_token?: string; id_token?: string; expires_in?: number; error?: string; error_description?: string }
   if (!response.ok || !body.access_token) {
     throw new Error(body.error_description || body.error || 'Microsoft no devolvió un token de acceso')
   }
@@ -157,6 +157,15 @@ async function refreshMicrosoftToken(
   if (!config.clientId || !config.clientSecret || !config.refreshToken) {
     throw new Error('Configura MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID y MICROSOFT_CLIENT_SECRET, y vuelve a conectar Microsoft 365')
   }
+
+  // Caché en memoria: sin esto cada correo dispara un refresh HTTP a Microsoft
+  // (medio segundo extra por mensaje). Se invalida por scope, cliente y refresh.
+  const cacheKey = `${config.tenantId}|${config.clientId}|${config.refreshToken}|${scope}`
+  const cached = tokenCache
+  if (cached && cached.key === cacheKey && cached.expiresAt > Date.now() + 30_000) {
+    return cached.accessToken
+  }
+
   const token = await tokenRequest(config, new URLSearchParams({
     client_id: config.clientId,
     client_secret: config.clientSecret,
@@ -175,5 +184,17 @@ async function refreshMicrosoftToken(
   if (!token.access_token) {
     throw new Error('Microsoft no devolvió un token de acceso')
   }
+  tokenCache = {
+    key: cacheKey,
+    accessToken: token.access_token,
+    expiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
+  }
   return token.access_token
+}
+
+let tokenCache: { key: string; accessToken: string; expiresAt: number } | null = null
+
+/** Para tests: limpia el caché de access tokens en memoria. */
+export function clearMicrosoftTokenCache(): void {
+  tokenCache = null
 }

@@ -20,7 +20,9 @@ const esc: Escaping = (v) =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
 
-function layout(title: string, body: string, base?: Partial<TicketEmailData>) {
+const DEFAULT_FOOTER = 'Puedes responder directamente a este correo para agregar un comentario a este ticket.'
+
+function layout(title: string, body: string, base?: Partial<TicketEmailData>, footer?: string) {
   const ticketHtml = base
     ? `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px">
@@ -41,7 +43,7 @@ function layout(title: string, body: string, base?: Partial<TicketEmailData>) {
       <div style="background:#ffffff;padding:24px;border-radius:0 0 12px 12px;color:#0f172a">
         ${body}${ticketHtml}
         <p style="color:#94a3b8;font-size:12px;margin-top:24px;border-top:1px solid #e2e8f0;padding-top:12px">
-          Puedes responder directamente a este correo para agregar un comentario a este ticket.
+          ${footer ?? DEFAULT_FOOTER}
         </p>
       </div>
     </div>
@@ -113,6 +115,26 @@ export function commentEmail(name: string, d: TicketEmailData, comment: string):
         ${esc(comment)}
       </blockquote>`,
       d
+    ),
+  }
+}
+
+/** Plantilla: enlace único para restablecer la contraseña */
+export function resetPasswordEmail(name: string, url: string): { subject: string; html: string } {
+  return {
+    subject: 'Restablecer tu contraseña',
+    html: layout(
+      'Recuperación de contraseña',
+      `
+      <p>Hola <strong>${esc(name)}</strong>,</p>
+      <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta.
+      Haz clic en el botón para elegir una nueva:</p>
+      <p style="text-align:center;margin:28px 0">
+        <a href="${esc(url)}" style="display:inline-block;background:#0f172a;color:#ffffff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Restablecer contraseña</a>
+      </p>
+      <p style="color:#64748b;font-size:13px">Si no solicitaste este cambio, simplemente ignora este correo: tu contraseña no cambiará.</p>`,
+      undefined,
+      'Este enlace es de un solo uso y caduca en 60 minutos.'
     ),
   }
 }

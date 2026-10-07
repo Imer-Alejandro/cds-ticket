@@ -16,6 +16,7 @@ import {
   Send, Loader2, CheckCircle2, XCircle, ChevronRight, Ticket,
   Paperclip, Clock, UserCheck, Play, History, FileText,
   ChevronDown, Sparkles, Pencil, Pause, Trash2, Eye, Download,
+  ChevronLeft, Music,
 } from "lucide-react"
 
 interface AdjuntoData { id: string; nombre: string; tipo: string; url: string; data: string | null; tamaño: number | null }
@@ -109,7 +110,7 @@ export default function TicketDetailPage() {
   const [editAsunto, setEditAsunto] = useState("")
   const [editDescripcion, setEditDescripcion] = useState("")
   const [savingEdit, setSavingEdit] = useState(false)
-  const [previewImage, setPreviewImage] = useState<AdjuntoData | null>(null)
+  const [previewMedia, setPreviewMedia] = useState<{ lista: AdjuntoData[]; indice: number } | null>(null)
 
   useSocket()
 
@@ -332,7 +333,9 @@ export default function TicketDetailPage() {
                     <Paperclip className="h-3.5 w-3.5" /> Archivos adjuntos ({ticket.adjuntos.length})
                   </p>
                   <div className="flex flex-wrap gap-3">
-                    {ticket.adjuntos.map(a => <AdjuntoCard key={a.id} a={a} onPreview={setPreviewImage} />)}
+                    {ticket.adjuntos.map((a, i) => (
+                      <AdjuntoCard key={a.id} a={a} onPreview={() => setPreviewMedia({ lista: ticket.adjuntos, indice: i })} />
+                    ))}
                   </div>
                 </div>
               )}
@@ -440,7 +443,9 @@ export default function TicketDetailPage() {
                       <p className="text-sm whitespace-pre-wrap leading-relaxed">{c.mensaje}</p>
                       {c.adjuntos?.length > 0 && (
                         <div className="flex flex-wrap gap-2.5 mt-3 pt-2 border-t border-border/30">
-                          {c.adjuntos.map(a => <AdjuntoCard key={a.id} a={a} onPreview={setPreviewImage} />)}
+                          {c.adjuntos.map((a, i) => (
+                            <AdjuntoCard key={a.id} a={a} onPreview={() => setPreviewMedia({ lista: c.adjuntos, indice: i })} />
+                          ))}
                         </div>
                       )}
                     </div>
@@ -699,17 +704,45 @@ export default function TicketDetailPage() {
           </div>
         </div>
       </Modal>
-      {/* Modal Previsualización de Imagen */}
-      <Modal open={!!previewImage} onClose={() => setPreviewImage(null)} title={previewImage?.nombre || "Vista previa de imagen"}>
-        <div className="flex flex-col items-center justify-center p-2">
-          {previewImage && (
-            <img
-              src={previewImage.data ? `data:${previewImage.tipo};base64,${previewImage.data}` : previewImage.url}
-              alt={previewImage.nombre}
-              className="max-h-[70vh] max-w-full rounded-xl object-contain shadow-lg"
-            />
-          )}
-        </div>
+      {/* Modal Previsualización de archivo (imagen, video o audio) */}
+      <Modal
+        open={!!previewMedia}
+        onClose={() => setPreviewMedia(null)}
+        title={previewMedia?.lista[previewMedia.indice]?.nombre || "Vista previa"}
+      >
+        {previewMedia && (
+          <div className="flex flex-col items-center justify-center gap-3 p-2">
+            <AdjuntoVista a={previewMedia.lista[previewMedia.indice]} />
+            {previewMedia.lista.length > 1 && (
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => setPreviewMedia(m => m && { ...m, indice: (m.indice - 1 + m.lista.length) % m.lista.length })}
+                  className="p-1.5 rounded-lg hover:bg-muted transition-colors cursor-pointer"
+                  title="Anterior"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <span className="tabular-nums">{previewMedia.indice + 1} de {previewMedia.lista.length}</span>
+                <button
+                  type="button"
+                  onClick={() => setPreviewMedia(m => m && { ...m, indice: (m.indice + 1) % m.lista.length })}
+                  className="p-1.5 rounded-lg hover:bg-muted transition-colors cursor-pointer"
+                  title="Siguiente"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => descargarAdjunto(previewMedia.lista[previewMedia.indice])}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline cursor-pointer"
+            >
+              <Download className="h-3.5 w-3.5" /> Descargar
+            </button>
+          </div>
+        )}
       </Modal>
     </div>
   )
@@ -717,22 +750,53 @@ export default function TicketDetailPage() {
 
 /* Componentes auxiliares */
 
-function AdjuntoCard({ a, onPreview }: { a: AdjuntoData; onPreview?: (a: AdjuntoData) => void }) {
-  const isImg = a.tipo?.startsWith('image/')
-  const download = () => {
-    if (a.data) {
-      const l = document.createElement('a')
-      l.href = `data:${a.tipo};base64,${a.data}`
-      l.download = a.nombre
-      l.click()
-      l.remove()
-    } else if (a.url) {
-      window.open(a.url, '_blank')
-    }
+function mediaSrc(a: AdjuntoData): string {
+  return a.data ? `data:${a.tipo};base64,${a.data}` : a.url
+}
+
+function descargarAdjunto(a: AdjuntoData) {
+  if (a.data) {
+    const l = document.createElement('a')
+    l.href = `data:${a.tipo};base64,${a.data}`
+    l.download = a.nombre
+    l.click()
+    l.remove()
+  } else if (a.url) {
+    window.open(a.url, '_blank')
   }
+}
+
+/** Render del archivo dentro del modal: imagen, video o audio. */
+function AdjuntoVista({ a }: { a: AdjuntoData }) {
+  const src = mediaSrc(a)
+  if (a.tipo?.startsWith('video/')) {
+    return <video src={src} controls className="max-h-[70vh] max-w-full rounded-xl shadow-lg bg-black" />
+  }
+  if (a.tipo?.startsWith('audio/')) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-6 px-4">
+        <div className="h-16 w-16 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+          <Music className="h-8 w-8" />
+        </div>
+        <audio src={src} controls className="w-[min(60vw,420px)]" />
+      </div>
+    )
+  }
+  if (a.tipo?.startsWith('image/')) {
+    return <img src={src} alt={a.nombre} className="max-h-[70vh] max-w-full rounded-xl object-contain shadow-lg" />
+  }
+  return null
+}
+
+function AdjuntoCard({ a, onPreview }: { a: AdjuntoData; onPreview?: () => void }) {
+  const isImg = a.tipo?.startsWith('image/')
+  const isVideo = a.tipo?.startsWith('video/')
+  const isAudio = a.tipo?.startsWith('audio/')
+  const download = () => descargarAdjunto(a)
+  const preview = () => (onPreview ? onPreview() : download())
 
   if (isImg) {
-    const imgSrc = a.data ? `data:${a.tipo};base64,${a.data}` : a.url
+    const imgSrc = mediaSrc(a)
     return (
       <div className="group relative rounded-xl border border-border/60 bg-card overflow-hidden shadow-xs hover:shadow-md transition-all w-36 sm:w-44 flex flex-col shrink-0">
         <div className="relative h-28 w-full bg-muted/40 flex items-center justify-center overflow-hidden">
@@ -740,7 +804,7 @@ function AdjuntoCard({ a, onPreview }: { a: AdjuntoData; onPreview?: (a: Adjunto
           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
             <button
               type="button"
-              onClick={() => onPreview ? onPreview(a) : download()}
+              onClick={preview}
               className="p-1.5 rounded-lg bg-white/90 text-slate-800 hover:bg-white transition-colors shadow-sm cursor-pointer"
               title="Previsualizar"
             >
@@ -755,6 +819,43 @@ function AdjuntoCard({ a, onPreview }: { a: AdjuntoData; onPreview?: (a: Adjunto
               <Download className="h-4 w-4" />
             </button>
           </div>
+        </div>
+        <div className="p-2 flex flex-col justify-between flex-1 bg-card">
+          <p className="text-xs font-medium truncate text-foreground" title={a.nombre}>{a.nombre}</p>
+          {a.tamaño && <p className="text-[10px] text-muted-foreground mt-0.5">{(a.tamaño / 1024).toFixed(0)} KB</p>}
+        </div>
+      </div>
+    )
+  }
+
+  if (isVideo || isAudio) {
+    return (
+      <div className="group rounded-xl border border-border/60 bg-card overflow-hidden shadow-xs hover:shadow-md transition-all w-44 sm:w-52 flex flex-col shrink-0">
+        <div className="relative h-24 w-full bg-slate-900 flex items-center justify-center overflow-hidden">
+          <div className="h-11 w-11 rounded-full bg-white/15 text-white flex items-center justify-center group-hover:scale-110 transition-transform">
+            {isVideo ? <Play className="h-5 w-5" /> : <Music className="h-5 w-5" />}
+          </div>
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={preview}
+              className="p-1.5 rounded-lg bg-white/90 text-slate-800 hover:bg-white transition-colors shadow-sm cursor-pointer"
+              title={isVideo ? 'Reproducir' : 'Escuchar'}
+            >
+              <Eye className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={download}
+              className="p-1.5 rounded-lg bg-white/90 text-slate-800 hover:bg-white transition-colors shadow-sm cursor-pointer"
+              title="Descargar"
+            >
+              <Download className="h-4 w-4" />
+            </button>
+          </div>
+          <span className="absolute bottom-1.5 left-2 text-[9px] font-semibold uppercase tracking-wide bg-black/60 text-white px-1.5 py-0.5 rounded">
+            {isVideo ? 'Video' : 'Audio'}
+          </span>
         </div>
         <div className="p-2 flex flex-col justify-between flex-1 bg-card">
           <p className="text-xs font-medium truncate text-foreground" title={a.nombre}>{a.nombre}</p>

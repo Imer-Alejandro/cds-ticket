@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { runMailCheck, type MailCheckHooks, type MailCheckStatus } from '../src/lib/mail/check'
-import { getMicrosoftAccessToken } from '../src/lib/mail/oauth'
+import { getMicrosoftAccessToken, clearMicrosoftTokenCache } from '../src/lib/mail/oauth'
 import type { EmailConfig } from '../src/lib/mail/config'
 
 vi.mock('../src/lib/mail/oauth', async (importOriginal) => {
@@ -89,6 +89,9 @@ function lastStatus(hooks: HooksWithSpies): MailCheckStatus {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // El caché de access tokens vive en memoria compartida: limpiarlo para que
+  // cada test haga su propia petición de refresh.
+  clearMicrosoftTokenCache()
 })
 
 describe('runMailCheck — líneas base y configuración', () => {

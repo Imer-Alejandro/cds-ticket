@@ -5,6 +5,7 @@ import {
   getMicrosoftGraphAccessToken,
   GRAPH_SCOPES,
   microsoftAuthorizationUrl,
+  clearMicrosoftTokenCache,
 } from '../src/lib/mail/oauth'
 import { sendEmail } from '../src/lib/mail/sender'
 import { loadEmailConfig, saveEmailConfig, type EmailConfig } from '../src/lib/mail/config'
@@ -88,6 +89,12 @@ function parsedBody(call: FetchCall) {
       body?: { contentType?: string; content?: string }
       toRecipients?: { emailAddress?: { address?: string } }[]
       internetMessageHeaders?: { name?: string; value?: string }[]
+      attachments?: {
+        '@odata.type'?: string
+        name?: string
+        contentType?: string
+        contentBytes?: string
+      }[]
     }
     saveToSentItems?: boolean
   }
@@ -96,6 +103,12 @@ function parsedBody(call: FetchCall) {
 function headerValue(body: ReturnType<typeof parsedBody>, name: string) {
   return body.message?.internetMessageHeaders?.find((h) => h.name === name)?.value
 }
+
+beforeEach(() => {
+  // El caché de access tokens vive en memoria compartida: limpiarlo para que
+  // cada test haga su propia petición de refresh.
+  clearMicrosoftTokenCache()
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -213,6 +226,61 @@ describe('sendEmailViaGraph', () => {
       }),
     ).rejects.toThrow(/403 ErrorAccessDenied/)
   })
+
+  it('incluye los adjuntos como fileAttachment en sendMail', async () => {
+    const calls = stubFetch({ status: 202, body: {} })
+
+    await sendEmailViaGraph('AT_G', {
+      to: 'cliente@empresa.com',
+      subject: 'Con captura',
+      html: '<p>mira</p>',
+      attachments: [{ nombre: 'captura.png', tipo: 'image/png', data: 'QUJD' }],
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(parsedBody(calls[0]).message?.attachments).toEqual([
+      {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: 'captura.png',
+        contentType: 'image/png',
+        contentBytes: 'QUJD',
+      },
+    ])
+  })
+
+  it('incluye los adjuntos en la respuesta createReply', async () => {
+    const calls = stubFetch(
+      { body: { value: [{ id: 'GRAPH-MSG-1' }] } },
+      { status: 201, body: { id: 'BORRADOR-1' } },
+      { status: 202, body: {} },
+    )
+
+    await sendEmailViaGraph('AT_G', {
+      to: 'cliente@empresa.com',
+      subject: '[TK-99999] Re: captura',
+      html: '<p>x</p>',
+      headers: { inReplyTo: 'abc@correo' },
+      attachments: [{ nombre: 'log.txt', tipo: 'text/plain', data: 'aG9sYQ==' }],
+    })
+
+    expect(parsedBody(calls[1]).message?.attachments).toEqual([
+      {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: 'log.txt',
+        contentType: 'text/plain',
+        contentBytes: 'aG9sYQ==',
+      },
+    ])
+    expect(calls[2].url).toBe('https://graph.microsoft.com/v1.0/me/messages/BORRADOR-1/send')
+  })
+
+  it('sin adjuntos no se envía la clave attachments', async () => {
+    const calls = stubFetch({ status: 202, body: {} })
+
+    await sendEmailViaGraph('AT_G', { to: 'a@b.c', subject: 'x', html: '<p>x</p>' })
+
+    expect(parsedBody(calls[0]).message?.attachments).toBeUndefined()
+  })
 })
 
 describe('getMicrosoftGraphAccessToken', () => {
@@ -298,6 +366,54 @@ describe('sendEmail (despacho)', () => {
     const options = sendMail.mock.calls[0]?.[0] as { to?: string; subject?: string; html?: string }
     expect(options.to).toBe('cliente@empresa.com')
     expect(options.subject).toBe('Asunto')
+  })
+
+  it('OAuth2 reenvía los adjuntos a Graph como fileAttachment', async () => {
+    const calls = stubFetch(
+      { body: { access_token: 'AT_G' } },
+      { status: 202, body: {} },
+    )
+
+    await sendEmail(
+      'cliente@empresa.com',
+      'Con captura',
+      '<p>mira</p>',
+      undefined,
+      [{ nombre: 'captura.png', tipo: 'image/png', data: 'QUJD' }],
+    )
+
+    expect(mockedTransport).not.toHaveBeenCalled()
+    expect(parsedBody(calls[1]).message?.attachments).toEqual([
+      {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: 'captura.png',
+        contentType: 'image/png',
+        contentBytes: 'QUJD',
+      },
+    ])
+  })
+
+  it('modo password adjunta los archivos decodificados en nodemailer', async () => {
+    mockedLoad.mockResolvedValue(baseConfig({ authMode: 'password', smtpUser: 'user', smtpPass: 'pass' }))
+    const sendMail = vi.fn(async (options: unknown) => options)
+    mockedTransport.mockReturnValue({ sendMail } as unknown as ReturnType<typeof nodemailer.createTransport>)
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('no debe llamarse a Graph') }))
+
+    await sendEmail(
+      'cliente@empresa.com',
+      'Con captura',
+      '<p>x</p>',
+      undefined,
+      [{ nombre: 'captura.png', tipo: 'image/png', data: 'QUJD' }],
+    )
+
+    const options = sendMail.mock.calls[0]?.[0] as {
+      attachments?: { filename?: string; content?: Buffer; contentType?: string }[]
+    }
+    expect(options.attachments).toHaveLength(1)
+    expect(options.attachments?.[0]?.filename).toBe('captura.png')
+    expect(options.attachments?.[0]?.contentType).toBe('image/png')
+    expect(options.attachments?.[0]?.content?.toString('utf8')).toBe('ABC')
   })
 
   it('sin fromAddress no envía ni lanza', async () => {

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { getMicrosoftAccessToken, MICROSOFT_SCOPES } from '../src/lib/mail/oauth'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { getMicrosoftAccessToken, MICROSOFT_SCOPES, clearMicrosoftTokenCache } from '../src/lib/mail/oauth'
 
 const config = {
   tenantId: 'tenant-1',
@@ -16,6 +16,12 @@ function stubFetch(body: Record<string, unknown>, ok = true) {
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }
+
+beforeEach(() => {
+  // El caché de access tokens vive en memoria compartida: limpiarlo para que
+  // cada test haga su propia petición de refresh.
+  clearMicrosoftTokenCache()
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()

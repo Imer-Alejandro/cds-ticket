@@ -7,7 +7,7 @@ import {
   type AgentEmailData,
 } from './templates'
 import { enqueueEmail } from './sender'
-import type { EmailMessage } from './outbox'
+import type { EmailAttachment, EmailMessage } from './outbox'
 
 /** Cabeceras de hilo de conversación (SMTP) de un evento de correo. */
 export interface EmailThreadHeaders {
@@ -23,7 +23,10 @@ export type EmailEvent = (
   | { type: 'ESTADO_CAMBIADO'; to: string; nombre: string; data: TicketEmailData; estadoLabel: string }
   | { type: 'NUEVO_COMENTARIO'; to: string; nombre: string; data: TicketEmailData; comentario: string }
 ) &
-  EmailThreadHeaders
+  EmailThreadHeaders & {
+    /** Adjuntos del comentario (base64) que viajan como archivos del correo. */
+    adjuntos?: EmailAttachment[]
+  }
 
 /**
  * Convierte un evento de dominio a mensajes de correo listos para enviar.
@@ -52,7 +55,12 @@ export function buildEmailMessage(ev: EmailEvent): EmailMessage {
       }
     }
   }
-  return { ...base(), inReplyTo: ev.inReplyTo ?? undefined, references: ev.references ?? undefined }
+  return {
+    ...base(),
+    inReplyTo: ev.inReplyTo ?? undefined,
+    references: ev.references ?? undefined,
+    attachments: ev.adjuntos?.length ? ev.adjuntos : undefined,
+  }
 }
 
 /**

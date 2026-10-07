@@ -2,19 +2,21 @@ import prisma from './prisma'
 import { getIO } from './socket-server'
 
 async function emitSocketEvent(event: string, payload: any, room?: string) {
-  const io = getIO()
-  if (io) {
-    if (room) io.to(room).emit(event, payload)
-    else io.emit(event, payload)
-    return
-  }
-
-  const baseUrl = (process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001').replace(/\/$/, '')
   try {
+    const io = getIO()
+    if (io) {
+      if (room) io.to(room).emit(event, payload)
+      else io.emit(event, payload)
+      return
+    }
+
+    const baseUrl = (process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001').replace(/\/$/, '')
     await fetch(`${baseUrl}/socket/emit`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ event, payload, room }),
+      // Sin timeout, un backend colgado retrasaría la respuesta de la API hasta 300 s.
+      signal: AbortSignal.timeout(5000),
     })
   } catch {
     // ignore; the notification should not break the ticket flow
@@ -36,7 +38,9 @@ export async function createNotification(
       include: { ticket: { select: { id: true, codigo: true, asunto: true } } },
     })
 
-    await emitSocketEvent('notificacion', {
+    // El emit va por HTTP al proceso de sockets: no se espera para que la
+    // respuesta de la API no dependa de la latencia del backend (:3001).
+    void emitSocketEvent('notificacion', {
       type: tipo,
       notificacion: {
         id: notificacion.id,
@@ -53,7 +57,7 @@ export async function createNotification(
 }
 
 export async function emitTicketUpdate(ticket: any, action: string, actorId?: string) {
-  await emitSocketEvent('ticketUpdated', {
+  void emitSocketEvent('ticketUpdated', {
     action,
     ticket,
     actorId,

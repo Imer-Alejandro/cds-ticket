@@ -154,6 +154,13 @@ export async function POST(request: Request) {
           ticket.solicitanteId ? prisma.usuario.findUnique({ where: { id: ticket.solicitanteId } }) : null,
           ticket.agenteId ? prisma.usuario.findUnique({ where: { id: ticket.agenteId } }) : null,
         ])
+        const adjuntosCorreo = adjuntos
+          .filter((a) => typeof a.data === 'string' && a.data)
+          .map((a) => ({
+            nombre: a.nombre || 'sin_nombre',
+            tipo: a.tipo || 'application/octet-stream',
+            data: a.data as string,
+          }))
         const events = buildCommentEmailEvents({
           ticket,
           autorId: session.id as string,
@@ -173,6 +180,7 @@ export async function POST(request: Request) {
               }
             : null,
           comentario: data.mensaje,
+          adjuntos: adjuntosCorreo.length ? adjuntosCorreo : undefined,
         })
         for (const ev of events) {
           notifyByEmail(ev)

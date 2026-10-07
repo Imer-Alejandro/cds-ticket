@@ -61,6 +61,26 @@ describe('buildEmailMessage', () => {
     expect(msg.inReplyTo).toBeUndefined()
     expect(msg.references).toBeUndefined()
   })
+
+  it('propaga los adjuntos del evento al mensaje', () => {
+    const adjuntos = [{ nombre: 'captura.png', tipo: 'image/png', data: 'QUJD' }]
+    const ev: EmailEvent = {
+      type: 'NUEVO_COMENTARIO',
+      to: 'juan@x.com',
+      nombre: 'Juan',
+      data,
+      comentario: 'mira la captura',
+      adjuntos,
+    }
+    const msg = buildEmailMessage(ev)
+    expect(msg.attachments).toEqual(adjuntos)
+  })
+
+  it('sin adjuntos el mensaje no lleva la clave attachments', () => {
+    const ev: EmailEvent = { type: 'NUEVO_COMENTARIO', to: 'juan@x.com', nombre: 'Juan', data, comentario: 'x' }
+    const msg = buildEmailMessage(ev)
+    expect(msg.attachments).toBeUndefined()
+  })
 })
 
 describe('toTicketEmailData', () => {
