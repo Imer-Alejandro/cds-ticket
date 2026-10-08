@@ -7,6 +7,7 @@ import { autoAssignAgent } from '../../src/lib/assignment'
 import { makePrismaAssignmentRepo } from '../../src/lib/assignment-prisma'
 import { runMailCheck, configPersistence, type MailCheckStatus } from '../../src/lib/mail/check'
 import { notifyIngestResult } from '../../src/lib/mail/notify-ingest'
+import { resolveRouting } from '../../src/lib/auto-route'
 
 let timerHandle: ReturnType<typeof setTimeout> | null = null
 let stopped = true
@@ -25,6 +26,7 @@ async function runCheck(cfg?: EmailConfig): Promise<MailCheckStatus> {
           repo: prisma as unknown as TicketRepo,
           defaultCategoriaId: categoriaId,
           resolveRoleId: () => resolveEmailRoleId(prisma),
+          resolverCategoria: (info) => resolveRouting(prisma, info),
           autoAssign: async ({ colaId }) => autoAssignAgent(makePrismaAssignmentRepo(prisma), colaId),
           systemFroms: [config.fromAddress, config.smtpUser].filter((v): v is string => Boolean(v)),
           log: console.log,

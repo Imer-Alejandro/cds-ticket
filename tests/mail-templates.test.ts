@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ackTicketEmail, assignmentEmail, statusEmail, commentEmail } from '../src/lib/mail/templates'
+import { ackTicketEmail, assignmentEmail, statusEmail, commentEmail, slaAvisoEmail } from '../src/lib/mail/templates'
 
 const data = {
   codigo: 'TK-00012',
@@ -38,5 +38,29 @@ describe('email templates', () => {
   it('commentEmail incluye el comentario', () => {
     const { html } = commentEmail('Juan', data, 'Ya lo estoy revisando')
     expect(html).toContain('Ya lo estoy revisando')
+  })
+
+  it('slaAvisoEmail incluye la alerta, el detalle y el enlace al ticket', () => {
+    const { subject, html } = slaAvisoEmail('Ana', {
+      ...data,
+      alerta: 'Plazo de respuesta vencido',
+      detalle: 'El ticket superó el plazo máximo de respuesta.',
+      url: 'http://localhost:3000/tickets/abc',
+    })
+    expect(subject).toBe('[TK-00012] Alerta de SLA: Plazo de respuesta vencido')
+    expect(html).toContain('Hola <strong>Ana</strong>')
+    expect(html).toContain('El ticket superó el plazo máximo de respuesta.')
+    expect(html).toContain('http://localhost:3000/tickets/abc')
+  })
+
+  it('slaAvisoEmail escapa contenido de usuario', () => {
+    const { html } = slaAvisoEmail('Ana', {
+      ...data,
+      alerta: '<b>x</b>',
+      detalle: '<script>alert(1)</script>',
+      url: 'javascript:alert(1)',
+    })
+    expect(html).not.toContain('<script>alert(1)</script>')
+    expect(html).not.toContain('javascript:alert(1)')
   })
 })

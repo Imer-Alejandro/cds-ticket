@@ -8,6 +8,7 @@ import { notifyByEmail, toTicketEmailData } from './notify-email'
 import { threadHeadersFromTicket } from './comment-email'
 import { autoAssignAgent } from '@/lib/assignment'
 import { makePrismaAssignmentRepo } from '@/lib/assignment-prisma'
+import { resolveRouting } from '@/lib/auto-route'
 
 let timerHandle: ReturnType<typeof setTimeout> | null = null
 let stopped = true
@@ -21,6 +22,7 @@ async function ingestParsed(parsed: IncomingEmail, config: EmailConfig): Promise
       repo: prisma as unknown as TicketRepo,
       defaultCategoriaId,
       resolveRoleId: () => resolveEmailRoleId(prisma),
+      resolverCategoria: (info) => resolveRouting(prisma, info),
       autoAssign: async ({ colaId }) => autoAssignAgent(makePrismaAssignmentRepo(prisma), colaId),
       systemFroms: [config.fromAddress, config.smtpUser].filter((v): v is string => Boolean(v)),
       log: console.log,

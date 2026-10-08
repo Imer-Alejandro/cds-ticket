@@ -9,6 +9,7 @@ import {
   headerThreadIds,
   mergeThreadRefs,
 } from './core'
+import { etiquetaColor } from '../categorize'
 import type { AgenteCandidato } from '@/lib/assignment'
 
 export interface IncomingEmail {
@@ -113,6 +114,20 @@ export interface IngestDeps {
   resolveRoleId?: () => Promise<string | null>
   /** Asignación automática por carga de la cola (si está configurada). */
   autoAssign?: (info: { colaId: string }) => Promise<AgenteCandidato | null>
+  /** Resuelve el routing del ticket: categoría por keywords + equipo/supervisor de la cola. */
+  resolverCategoria?: (info: {
+    asunto?: string
+    descripcion?: string
+    manualCategoriaId?: string | null
+    defaultCategoriaId?: string | null
+  }) => Promise<{
+    categoriaId: string
+    categoriaNombre: string
+    colaId: string | null
+    equipo: { id: string; nombre: string } | null
+    supervisor: { id: string; nombre: string; apellido: string } | null
+    etiquetas: string[]
+  }>
   /** Direcciones que envía el propio sistema: sus correos se ignoran (anti-loop). */
   systemFroms?: string[]
   log?: (msg: string) => void
@@ -344,22 +359,49 @@ export async function handleIncomingEmail(
     })
   }
 
-  // Categoría
-  let categoriaId = deps.defaultCategoriaId?.trim() || null
-  let categoriaColaId: string | null = null
-  if (categoriaId) {
-    const cat = await repo.categoria.findUnique({ where: { id: categoriaId }, select: { id: true, colaDefaultId: true } })
-    if (!cat) categoriaId = null
-    else categoriaColaId = cat.colaDefaultId ?? null
+  // Categoría: auto-clasificación por palabras clave (asunto + cuerpo) cuando
+  // hay resolver configurado; si no, la categoría por defecto o la primera.
+  let routingScore: {
+    categoriaId: string
+    categoriaNombre: string
+    colaId: string | null
+    equipo: { id: string; nombre: string } | null
+    supervisor: { id: string; nombre: string; apellido: string } | null
+    etiquetas: string[]
   }
-  if (!categoriaId) {
-    const fallback = await repo.categoria.findFirst({ orderBy: { nombre: 'asc' } })
-    categoriaId = fallback?.id ?? null
+  if (deps.resolverCategoria) {
+    routingScore = await deps.resolverCategoria({
+      asunto: email.subject ?? undefined,
+      descripcion:
+        typeof email.text === 'string' ? email.text : typeof email.html === 'string' ? email.html : undefined,
+      manualCategoriaId: null,
+      defaultCategoriaId: deps.defaultCategoriaId?.trim() || null,
+    })
+    if (!routingScore.categoriaId) {
+      log?.('[Mail] Sin categoría aplicable, correo ignorado')
+      return null
+    }
+  } else {
+    const porDefecto =
+      deps.defaultCategoriaId?.trim()
+        ? await repo.categoria.findUnique({ where: { id: deps.defaultCategoriaId.trim() }, select: { id: true, nombre: true, colaDefaultId: true } })
+        : null
+    const elegida = porDefecto || (await repo.categoria.findFirst({ orderBy: { nombre: 'asc' }, select: { id: true, nombre: true, colaDefaultId: true } }))
+    if (!elegida?.id) {
+      log?.('[Mail] Sin categoría por defecto, correo ignorado')
+      return null
+    }
+    routingScore = {
+      categoriaId: elegida.id,
+      categoriaNombre: elegida.nombre,
+      colaId: elegida.colaDefaultId ?? null,
+      equipo: null,
+      supervisor: null,
+      etiquetas: [],
+    }
   }
-  if (!categoriaId) {
-    log?.('[Mail] Sin categoría por defecto, correo ignorado')
-    return null
-  }
+  const categoriaId = routingScore.categoriaId
+  const categoriaColaId = routingScore.colaId
 
   // Código concurrente-safe y SLA por categoría+prioridad
   const lastTickets = await repo.ticket.findMany({ orderBy: { codigo: 'desc' }, take: 10, select: { codigo: true } })
@@ -381,7 +423,10 @@ export async function handleIncomingEmail(
       nivelPrioridad: 'MEDIA',
       solicitanteId: solicitante.id,
       categoriaId,
+      colaId: routingScore.colaId,
       slaId: sla?.id ?? null,
+      equipoId: routingScore.equipo?.id ?? null,
+      supervisorId: routingScore.supervisor?.id ?? null,
       origen: 'CORREO',
       // Hilo de conversación: este correo inicia la rama de la plataforma
       messageId: incomingMessageId,
@@ -399,6 +444,52 @@ export async function handleIncomingEmail(
       valorNuevo: 'Ticket creado desde correo',
     },
   })
+
+  // Auto-etiquetas: categorías adicionales detectadas por palabras clave
+  for (const nombreEtiqueta of routingScore.etiquetas) {
+    try {
+      let etiqueta = await repo.etiqueta?.findFirst({ where: { nombre: nombreEtiqueta } })
+      if (!etiqueta) etiqueta = await repo.etiqueta?.create({ data: { nombre: nombreEtiqueta, color: etiquetaColor(nombreEtiqueta) } })
+      if (etiqueta) {
+        const yaEtiquetado = await repo.ticketEtiqueta?.findFirst({ where: { ticketId: ticket.id, etiquetaId: etiqueta.id } })
+        if (!yaEtiquetado) await repo.ticketEtiqueta?.create({ data: { ticketId: ticket.id, etiquetaId: etiqueta.id } })
+      }
+    } catch (err) {
+      log?.(`[Mail] No se pudo asignar la etiqueta "${nombreEtiqueta}": ${(err as Error).message}`)
+    }
+  }
+  if (routingScore.etiquetas.length) {
+    await repo.logTicket.create({
+      data: {
+        ticketId: ticket.id,
+        usuarioId: solicitante.id,
+        accion: 'AUTO_CATEGORIA',
+        valorNuevo: `${routingScore.categoriaNombre} (+ etiquetas: ${routingScore.etiquetas.join(', ')})`,
+      },
+    })
+  }
+  if (routingScore.equipo) {
+    await repo.logTicket.create({
+      data: {
+        ticketId: ticket.id,
+        usuarioId: solicitante.id,
+        accion: 'ASIGNACION_EQUIPO',
+        valorAnterior: 'Sin equipo',
+        valorNuevo: routingScore.equipo.nombre,
+      },
+    })
+  }
+  if (routingScore.supervisor) {
+    await repo.logTicket.create({
+      data: {
+        ticketId: ticket.id,
+        usuarioId: solicitante.id,
+        accion: 'ASIGNACION_SUPERVISOR',
+        valorAnterior: 'Sin supervisor',
+        valorNuevo: `${routingScore.supervisor.nombre} ${routingScore.supervisor.apellido}`.trim(),
+      },
+    })
+  }
 
   // Asignación automática por cola, si está configurada (FASE B)
   let agenteAsignadoId: string | null = null

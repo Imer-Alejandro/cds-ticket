@@ -17,6 +17,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       include: {
         solicitante: { select: { id: true, nombre: true, apellido: true, correo: true } },
         agente: { select: { id: true, nombre: true, apellido: true } },
+        equipo: { select: { id: true, nombre: true } },
+        supervisor: { select: { id: true, nombre: true, apellido: true } },
         categoria: { select: { id: true, nombre: true } },
         cola: { select: { id: true, nombre: true, equipo: { select: { nombre: true } } } },
         sla: true,
@@ -112,6 +114,64 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       }
       logs.push({ accion: 'ASIGNACION', valorAnterior: nombreAnterior, valorNuevo: `${nombreNuevo} (${data.agenteId})` })
     }
+    if (data.equipoId !== undefined && data.equipoId !== ticket.equipoId) {
+      if (!puedeAsignar) {
+        return NextResponse.json({ error: 'No tienes permisos para asignar equipo' }, { status: 403 })
+      }
+      const equipoNuevo = data.equipoId ? await prisma.equipo.findUnique({ where: { id: data.equipoId }, select: { id: true, nombre: true, supervisorId: true } }) : null
+      if (data.equipoId && !equipoNuevo) {
+        return NextResponse.json({ error: 'Equipo no encontrado' }, { status: 404 })
+      }
+      updateData.equipoId = equipoNuevo?.id ?? null
+      let nombreAnterior = 'Sin equipo'
+      if (ticket.equipoId) {
+        const eqAnterior = await prisma.equipo.findUnique({ where: { id: ticket.equipoId }, select: { nombre: true } })
+        if (eqAnterior) nombreAnterior = eqAnterior.nombre
+      }
+      logs.push({
+        accion: 'ASIGNACION_EQUIPO',
+        valorAnterior: nombreAnterior,
+        valorNuevo: equipoNuevo?.nombre || 'Sin equipo',
+      })
+      // Al cambiar de equipo, el supervisor por defecto es el del equipo
+      const nuevoSupervisorId = equipoNuevo?.supervisorId ?? null
+      if (nuevoSupervisorId !== ticket.supervisorId) {
+        updateData.supervisorId = nuevoSupervisorId
+        const supNuevo = nuevoSupervisorId
+          ? await prisma.usuario.findUnique({ where: { id: nuevoSupervisorId }, select: { nombre: true, apellido: true } })
+          : null
+        let nombreSupervisorAnterior = 'Sin supervisor'
+        if (ticket.supervisorId) {
+          const supAnterior = await prisma.usuario.findUnique({ where: { id: ticket.supervisorId }, select: { nombre: true, apellido: true } })
+          if (supAnterior) nombreSupervisorAnterior = `${supAnterior.nombre} ${supAnterior.apellido}`.trim()
+        }
+        logs.push({
+          accion: 'ASIGNACION_SUPERVISOR',
+          valorAnterior: nombreSupervisorAnterior,
+          valorNuevo: supNuevo ? `${supNuevo.nombre} ${supNuevo.apellido}`.trim() : 'Sin supervisor',
+        })
+      }
+    }
+    if (data.supervisorId !== undefined && data.supervisorId !== ticket.supervisorId) {
+      if (!puedeAsignar) {
+        return NextResponse.json({ error: 'No tienes permisos para asignar supervisor' }, { status: 403 })
+      }
+      const supNuevo = data.supervisorId ? await prisma.usuario.findUnique({ where: { id: data.supervisorId }, select: { id: true, nombre: true, apellido: true } }) : null
+      if (data.supervisorId && !supNuevo) {
+        return NextResponse.json({ error: 'Supervisor no encontrado' }, { status: 404 })
+      }
+      updateData.supervisorId = supNuevo?.id ?? null
+      let nombreAnterior = 'Sin supervisor'
+      if (ticket.supervisorId) {
+        const supAnterior = await prisma.usuario.findUnique({ where: { id: ticket.supervisorId }, select: { nombre: true, apellido: true } })
+        if (supAnterior) nombreAnterior = `${supAnterior.nombre} ${supAnterior.apellido}`.trim()
+      }
+      logs.push({
+        accion: 'ASIGNACION_SUPERVISOR',
+        valorAnterior: nombreAnterior,
+        valorNuevo: supNuevo ? `${supNuevo.nombre} ${supNuevo.apellido}`.trim() : 'Sin supervisor',
+      })
+    }
     if (data.nivelPrioridad && data.nivelPrioridad !== ticket.nivelPrioridad) {
       if (!puedeCambiarEstado) {
         return NextResponse.json({ error: 'No tienes permisos para cambiar la prioridad' }, { status: 403 })
@@ -140,6 +200,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       include: {
         solicitante: { select: { id: true, nombre: true, apellido: true } },
         agente: { select: { id: true, nombre: true, apellido: true } },
+        equipo: { select: { id: true, nombre: true } },
+        supervisor: { select: { id: true, nombre: true, apellido: true } },
         categoria: { select: { id: true, nombre: true } },
       },
     })
@@ -161,6 +223,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
     if (data.agenteId && data.agenteId !== ticket.agenteId) {
       await createNotification(data.agenteId, 'ASIGNACION', `Has sido asignado al ticket ${ticket.codigo}: ${ticket.asunto}`, id)
+    }
+    if (data.supervisorId !== undefined && data.supervisorId && data.supervisorId !== ticket.supervisorId) {
+      await createNotification(data.supervisorId, 'ASIGNACION', `Ticket ${ticket.codigo}: ${ticket.asunto} asignado bajo tu supervisión`, id)
     }
 
     // Emails: asignación al nuevo agente y cambio de estado al solicitante

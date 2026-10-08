@@ -3,7 +3,8 @@ import { createServer } from 'http'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import { initSocketServer } from './src/socket'
-import { startMailListener } from './src/mail'
+import { startMailListener, stopMailListener } from './src/mail'
+import { startSlaMonitor, stopSlaMonitor } from './src/sla-monitor'
 
 dotenv.config()
 dotenv.config({ path: '.env.local', override: true })
@@ -42,16 +43,20 @@ app.post('/socket/emit', (req, res) => {
 })
 
 startMailListener()
+startSlaMonitor()
 
 httpServer.listen(port, () => {
   console.log(`✓ Backend servidor escuchando en http://localhost:${port}`)
   console.log(`✓ Socket.IO listo`)
   console.log(`✓ Mail listener iniciado`)
+  console.log(`✓ Monitor SLA iniciado`)
 })
 
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n✓ Backend apagando...')
+  stopMailListener()
+  stopSlaMonitor()
   httpServer.close(() => {
     console.log('✓ Servidor cerrado')
     process.exit(0)

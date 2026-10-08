@@ -7,6 +7,8 @@ import { notifyByEmail, toTicketEmailData } from '@/lib/mail/notify-email'
 import { nextTicketCode } from '@/lib/mail/core'
 import { autoAssignAgent } from '@/lib/assignment'
 import { makePrismaAssignmentRepo } from '@/lib/assignment-prisma'
+import { resolveRouting } from '@/lib/auto-route'
+import { etiquetaColor } from '@/lib/categorize'
 import { esPrioridadTicket, PRIORIDADES_TICKET, ORIGENES_TICKET } from '@/lib/tickets'
 
 export async function GET(request: Request) {
@@ -114,6 +116,15 @@ export async function POST(request: Request) {
     })
     if (!categoria) return NextResponse.json({ error: 'Categoría no encontrada' }, { status: 404 })
 
+    // Routing: la categoría elegida a mano manda; las coincidencias por palabras
+    // clave (asunto + descripción) adicionales pasan a etiquetas automáticas y
+    // la cola/equipo/supervisor salen de la cola por defecto de la categoría.
+    const routing = await resolveRouting(prisma, {
+      asunto: data.asunto,
+      descripcion: data.descripcion,
+      manualCategoriaId: data.categoriaId,
+    })
+
     const esMiembroEquipo = hasPermission(session, 'tickets.viewAssigned')
 
     // Asignación: miembro del equipo se autoasigna (o usa el agente explícito);
@@ -122,7 +133,7 @@ export async function POST(request: Request) {
     if (esMiembroEquipo) {
       agenteIdAsignado = data.agenteId || (session.id as string)
     } else {
-      const asignado = await autoAssignAgent(makePrismaAssignmentRepo(prisma), categoria.colaDefaultId)
+      const asignado = await autoAssignAgent(makePrismaAssignmentRepo(prisma), routing.colaId)
       agenteIdAsignado = asignado?.id ?? null
     }
 
@@ -130,7 +141,7 @@ export async function POST(request: Request) {
     const codigo = nextTicketCode(lastTickets.map(t => t.codigo))
 
     const sla = await prisma.sla.findFirst({
-      where: { categoriaId: data.categoriaId, prioridad: nivelPrioridad },
+      where: { categoriaId: routing.categoriaId, prioridad: nivelPrioridad },
     })
 
     const ticket = await prisma.ticket.create({
@@ -142,9 +153,11 @@ export async function POST(request: Request) {
         nivelPrioridad,
         solicitanteId: data.solicitanteId || session.id as string,
         agenteId: agenteIdAsignado,
-        categoriaId: data.categoriaId,
-        colaId: categoria.colaDefaultId,
+        categoriaId: routing.categoriaId,
+        colaId: routing.colaId,
         slaId: sla?.id || null,
+        equipoId: routing.equipo?.id ?? null,
+        supervisorId: routing.supervisor?.id ?? null,
         origen,
       },
       include: {
@@ -161,6 +174,47 @@ export async function POST(request: Request) {
         valorNuevo: 'Ticket creado',
       },
     })
+
+    // Auto-etiquetas: categorías adicionales detectadas por palabras clave
+    for (const nombreEtiqueta of routing.etiquetas) {
+      let etiqueta = await prisma.etiqueta.findFirst({ where: { nombre: nombreEtiqueta } })
+      if (!etiqueta) etiqueta = await prisma.etiqueta.create({ data: { nombre: nombreEtiqueta, color: etiquetaColor(nombreEtiqueta) } })
+      const yaEtiquetado = await prisma.ticketEtiqueta.findFirst({ where: { ticketId: ticket.id, etiquetaId: etiqueta.id } })
+      if (!yaEtiquetado) await prisma.ticketEtiqueta.create({ data: { ticketId: ticket.id, etiquetaId: etiqueta.id } })
+    }
+    if (routing.etiquetas.length) {
+      await prisma.logTicket.create({
+        data: {
+          ticketId: ticket.id,
+          usuarioId: ticket.solicitanteId,
+          accion: 'AUTO_CATEGORIA',
+          valorNuevo: `${routing.categoriaNombre} (+ etiquetas: ${routing.etiquetas.join(', ')})`,
+        },
+      })
+    }
+    if (routing.equipo) {
+      await prisma.logTicket.create({
+        data: {
+          ticketId: ticket.id,
+          usuarioId: ticket.solicitanteId,
+          accion: 'ASIGNACION_EQUIPO',
+          valorAnterior: 'Sin equipo',
+          valorNuevo: routing.equipo.nombre,
+        },
+      })
+    }
+    if (routing.supervisor) {
+      await prisma.logTicket.create({
+        data: {
+          ticketId: ticket.id,
+          usuarioId: ticket.solicitanteId,
+          accion: 'ASIGNACION_SUPERVISOR',
+          valorAnterior: 'Sin supervisor',
+          valorNuevo: `${routing.supervisor.nombre} ${routing.supervisor.apellido}`.trim(),
+        },
+      })
+      await createNotification(routing.supervisor.id, 'NUEVO_TICKET', `Nuevo ticket de tu equipo ${ticket.codigo}: ${ticket.asunto}`, ticket.id)
+    }
 
     let agenteAsignado: { id: string; nombre: string; apellido: string; correo?: string | null } | null = null
     if (agenteIdAsignado) {

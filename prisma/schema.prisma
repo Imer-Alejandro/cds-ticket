@@ -43,6 +43,7 @@ model Usuario {
   logsTicket         LogTicket[]
   equiposSupervisor  Equipo[]             @relation("Supervisor")
   equipos            EquipoUsuario[]
+  ticketsSupervisados Ticket[]            @relation("TicketSupervisor")
   plantillasCreadas  PlantillaRespuesta[]
   automatizaciones   Automatizacion[]
   notificaciones     Notificacion[]
@@ -53,6 +54,7 @@ model Categoria {
   id            String  @id @default(uuid()) @db.Uuid
   nombre        String
   descripcion   String?
+  palabrasClave String? // etiquetas/palabras clave separadas por comas para auto-clasificar por correo
   colaDefaultId String? @db.Uuid
 
   colaDefault Cola?                @relation(fields: [colaDefaultId], references: [id])
@@ -81,6 +83,7 @@ model Equipo {
   supervisor Usuario         @relation("Supervisor", fields: [supervisorId], references: [id])
   miembros   EquipoUsuario[]
   colas      Cola[]
+  tickets    Ticket[]        @relation("TicketEquipo")
 }
 
 model EquipoUsuario {
@@ -115,6 +118,8 @@ model Ticket {
   categoriaId           String    @db.Uuid
   colaId                String?   @db.Uuid
   slaId                 String?   @db.Uuid
+  equipoId              String?   @db.Uuid
+  supervisorId          String?   @db.Uuid
     origen                String // WEB, CORREO
     // Hilo de correo: identidad del mensaje que creó el ticket y cadena del hilo
     messageId             String?  @unique // Message-ID raíz (normalizado sin <>)
@@ -131,6 +136,8 @@ model Ticket {
   categoria   Categoria @relation(fields: [categoriaId], references: [id])
   cola        Cola?     @relation(fields: [colaId], references: [id])
   sla         Sla?      @relation(fields: [slaId], references: [id])
+  equipo      Equipo?   @relation("TicketEquipo", fields: [equipoId], references: [id])
+  supervisor  Usuario?  @relation("TicketSupervisor", fields: [supervisorId], references: [id])
 
   comentarios    Comentario[]
   adjuntos       Adjunto[]
@@ -138,9 +145,21 @@ model Ticket {
   etiquetas      TicketEtiqueta[]
   encuesta       EncuestaSatisfaccion?
   notificaciones Notificacion[]
+  slaAvisos      SlaAviso[]
 }
 
-  model Comentario {
+model SlaAviso {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @db.Uuid
+  tipo      String // AVISO_RESPUESTA, VENCIDO_RESPUESTA, VENCIDO_RESOLUCION
+  fecha     DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+
+  @@unique([ticketId, tipo])
+}
+
+model Comentario {
     id        String   @id @default(uuid()) @db.Uuid
     ticketId  String   @db.Uuid
     usuarioId String   @db.Uuid

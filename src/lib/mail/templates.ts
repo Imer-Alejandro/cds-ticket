@@ -10,6 +10,12 @@ export interface AgentEmailData extends TicketEmailData {
   agenteNombre: string
 }
 
+export interface SlaAlertEmailData extends TicketEmailData {
+  alerta: string
+  detalle: string
+  url: string
+}
+
 interface Escaping {
   (v: string): string
 }
@@ -19,6 +25,13 @@ const esc: Escaping = (v) =>
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+
+/** Solo permite enlaces http(s) o relativos (evita javascript: y demás URLs peligrosas). */
+function safeUrl(v: string): string {
+  const raw = String(v ?? '').trim()
+  if (/^(https?:\/\/|\/)/i.test(raw)) return raw
+  return '#'
+}
 
 const DEFAULT_FOOTER = 'Puedes responder directamente a este correo para agregar un comentario a este ticket.'
 
@@ -115,6 +128,27 @@ export function commentEmail(name: string, d: TicketEmailData, comment: string):
         ${esc(comment)}
       </blockquote>`,
       d
+    ),
+  }
+}
+
+/** Plantilla: alerta de SLA (aviso previo o plazo vencido) para agente/supervisor */
+export function slaAvisoEmail(name: string, d: SlaAlertEmailData): { subject: string; html: string } {
+  return {
+    subject: `[${d.codigo}] Alerta de SLA: ${d.alerta}`,
+    html: layout(
+      'Alerta de SLA',
+      `
+      <p>Hola <strong>${esc(name)}</strong>,</p>
+      <p>El ticket <strong>${esc(d.codigo)}</strong> requiere atención:</p>
+      <blockquote style="border-left:3px solid #eab308;margin:12px 0;padding:8px 16px;color:#334155;background:#fefce8">
+        ${esc(d.detalle)}
+      </blockquote>
+      <p style="text-align:center;margin:24px 0">
+        <a href="${safeUrl(d.url)}" style="display:inline-block;background:#0f172a;color:#ffffff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Ver ticket</a>
+      </p>`,
+      d,
+      'Este es un aviso automático generado por el sistema de tickets. No respondas a este correo: agrega un comentario desde la plataforma.'
     ),
   }
 }

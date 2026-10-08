@@ -218,6 +218,79 @@ describe('handleIncomingEmail - correo nuevo', () => {
     expect(result?.kind).toBe('new')
     expect(repo.ticket.update).not.toHaveBeenCalled()
   })
+
+  it('usa resolverCategoria para auto-clasificar, asignar equipo/supervisor y dejar etiquetas', async () => {
+    const repo = makeRepo()
+    repo.etiqueta = {
+      findFirst: vi.fn(async () => null),
+      create: vi.fn(async (a: any) => ({ id: 'et-1', ...a.data })),
+    }
+    repo.ticketEtiqueta = {
+      findFirst: vi.fn(async () => null),
+      create: vi.fn(async (a: any) => ({ id: 'te-1', ...a.data })),
+    }
+    const resolverCategoria = vi.fn(async () => ({
+      categoriaId: 'cat-auto',
+      categoriaNombre: 'Hardware',
+      colaId: 'cola-auto',
+      equipo: { id: 'eq-1', nombre: 'Soporte' },
+      supervisor: { id: 'sup-1', nombre: 'Ana', apellido: 'Perez' },
+      etiquetas: ['Software'],
+    }))
+
+    const result = await handleIncomingEmail(
+      { repo, resolveRoleId: async () => ROLE, resolverCategoria },
+      {
+        from: { value: [{ address: 'juan@x.com' }] },
+        subject: 'monitor roto',
+        text: 'cuerpo',
+      }
+    )
+
+    expect(result?.kind).toBe('new')
+    expect(resolverCategoria).toHaveBeenCalledWith(
+      expect.objectContaining({ asunto: 'monitor roto' })
+    )
+    const createCall = (repo.ticket.create as any).mock.calls[0][0]
+    expect(createCall.data.categoriaId).toBe('cat-auto')
+    expect(createCall.data.colaId).toBe('cola-auto')
+    expect(createCall.data.equipoId).toBe('eq-1')
+    expect(createCall.data.supervisorId).toBe('sup-1')
+
+    const logs = (repo.logTicket.create as any).mock.calls.map((c: any) => c[0].data)
+    expect(logs.some((l: any) => l.accion === 'AUTO_CATEGORIA' && l.valorNuevo.includes('Software'))).toBe(true)
+    expect(logs.some((l: any) => l.accion === 'ASIGNACION_EQUIPO' && l.valorNuevo === 'Soporte')).toBe(true)
+    expect(logs.some((l: any) => l.accion === 'ASIGNACION_SUPERVISOR' && l.valorNuevo === 'Ana Perez')).toBe(true)
+
+    expect(repo.etiqueta.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ nombre: 'Software' }) })
+    )
+    expect(repo.ticketEtiqueta.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ ticketId: expect.any(String), etiquetaId: 'et-1' }) })
+    )
+  })
+
+  it('ignora el correo si resolverCategoria no encuentra categoría', async () => {
+    const repo = makeRepo()
+    const resolverCategoria = vi.fn(async () => ({
+      categoriaId: '',
+      categoriaNombre: '',
+      colaId: null,
+      equipo: null,
+      supervisor: null,
+      etiquetas: [],
+    }))
+    const result = await handleIncomingEmail(
+      { repo, resolveRoleId: async () => ROLE, resolverCategoria },
+      {
+        from: { value: [{ address: 'juan@x.com' }] },
+        subject: 'sin categoría',
+        text: 'cuerpo',
+      }
+    )
+    expect(result).toBeNull()
+    expect(repo.ticket.create).not.toHaveBeenCalled()
+  })
 })
 
 describe('handleIncomingEmail - respuesta RE:', () => {

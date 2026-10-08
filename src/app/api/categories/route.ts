@@ -46,8 +46,10 @@ export async function POST(request: Request) {
     const newCategoria = await prisma.categoria.create({
       data: {
         nombre: data.nombre,
-        descripcion: data.descripcion || null
-      }
+        descripcion: data.descripcion || null,
+        palabrasClave: typeof data.palabrasClave === 'string' && data.palabrasClave.trim() ? data.palabrasClave.trim() : null,
+        colaDefaultId: data.colaDefaultId || null,
+      },
     })
 
     return NextResponse.json(newCategoria, { status: 201 })

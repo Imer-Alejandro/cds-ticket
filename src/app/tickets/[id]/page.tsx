@@ -28,6 +28,8 @@ interface Ticket {
   fechaPrimeraRespuesta: string | null
   solicitante: { id: string; nombre: string; apellido: string; correo: string }
   agente: { id: string; nombre: string; apellido: string } | null
+  equipo: { id: string; nombre: string } | null
+  supervisor: { id: string; nombre: string; apellido: string } | null
   categoria: { id: string; nombre: string }
   cola: { id: string; nombre: string; equipo: { nombre: string } } | null
   sla: { id: string; prioridad: string; minutosRespuesta: number; minutosResolucion: number } | null
@@ -38,6 +40,12 @@ interface Comentario { id: string; mensaje: string; esInterno: boolean; fecha: s
 interface Log { id: string; accion: string; valorAnterior?: string; valorNuevo?: string; fecha: string; usuario: { nombre: string; apellido: string } }
 
 interface Plantilla { id: string; titulo: string; contenido: string; categoriaId: string | null; esGlobal: boolean }
+
+interface Teama {
+  id: string
+  nombre: string
+  supervisor: { id: string; nombre: string; apellido: string } | null
+}
 
 const ESTADOS: Record<string, { label: string; desc: string; color: string; light: string }> = {
   NUEVO: { label: "Nuevo", desc: "Pendiente de asignación", color: "text-blue-600 bg-blue-50 border-blue-200", light: "bg-blue-500" },
@@ -100,6 +108,7 @@ export default function TicketDetailPage() {
   const [comment, setComment] = useState("")
   const [isInternal, setIsInternal] = useState(false)
   const [agents, setAgents] = useState<{ id: string; nombre: string; apellido: string }[]>([])
+  const [teams, setTeams] = useState<Teama[]>([])
   const [sending, setSending] = useState(false)
   const [updating, setUpdating] = useState(false)
   const [commentFiles, setCommentFiles] = useState<File[]>([])
@@ -150,7 +159,8 @@ export default function TicketDetailPage() {
     Promise.all([
       fetch(`/api/tickets/${params.id}`).then(r => r.ok ? r.json() : null),
       fetch("/api/users/agents").then(r => r.ok ? r.json() : []),
-    ]).then(([t, a]) => { setTicket(t); setAgents(a || []) }).finally(() => setLoading(false))
+      fetch("/api/teams").then(r => r.ok ? r.json() : []),
+    ]).then(([t, a, tm]) => { setTicket(t); setAgents(a || []); setTeams(tm || []) }).finally(() => setLoading(false))
   }, [params.id])
 
   useEffect(() => {
@@ -611,6 +621,53 @@ export default function TicketDetailPage() {
                     <option key={a.id} value={a.id}>{a.nombre} {a.apellido}</option>
                   ))}
                 </select>
+              )}
+              <div className="h-px bg-border/50" />
+              {ticket.equipo && (
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-full bg-indigo/10 text-indigo-600 flex items-center justify-center text-xs font-bold shrink-0">
+                    {(ticket.equipo.nombre.charAt(0) || "E").toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium">{ticket.equipo.nombre}</p>
+                    <p className="text-[10px] text-muted-foreground">Equipo</p>
+                  </div>
+                </div>
+              )}
+              {ticket.supervisor && (
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-full bg-indigo/10 text-indigo-600 flex items-center justify-center text-xs font-bold shrink-0">
+                    {ticket.supervisor.nombre.charAt(0)}{ticket.supervisor.apellido.charAt(0)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium">{ticket.supervisor.nombre} {ticket.supervisor.apellido}</p>
+                    <p className="text-[10px] text-muted-foreground">Supervisor</p>
+                  </div>
+                </div>
+              )}
+              {puedeAsignar && (
+                <div className="space-y-2">
+                  <select
+                    value={ticket.equipo?.id || ""}
+                    onChange={e => updateTicket({ equipoId: e.target.value || null })}
+                    className="flex h-9 w-full rounded-xl border border-input bg-transparent px-3 text-xs"
+                  >
+                    <option value="">{ticket.equipo ? "Cambiar equipo..." : "Asignar equipo..."}</option>
+                    {teams.map(t => (
+                      <option key={t.id} value={t.id}>{t.nombre}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={ticket.supervisor?.id || ""}
+                    onChange={e => updateTicket({ supervisorId: e.target.value || null })}
+                    className="flex h-9 w-full rounded-xl border border-input bg-transparent px-3 text-xs"
+                  >
+                    <option value="">{ticket.supervisor ? "Cambiar supervisor..." : "Asignar supervisor..."}</option>
+                    {Array.from(new Map(teams.filter(t => t.supervisor).map(t => [t.supervisor!.id, t.supervisor])).values()).map(s => (
+                      <option key={s!.id} value={s!.id}>{s!.nombre} {s!.apellido}</option>
+                    ))}
+                  </select>
+                </div>
               )}
             </CardContent>
           </Card>

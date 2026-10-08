@@ -23,7 +23,7 @@ async function emitSocketEvent(event: string, payload: any, room?: string) {
   }
 }
 
-type NotificationType = 'NUEVO_TICKET' | 'CAMBIO_ESTADO' | 'ASIGNACION' | 'NUEVO_COMENTARIO'
+type NotificationType = 'NUEVO_TICKET' | 'CAMBIO_ESTADO' | 'ASIGNACION' | 'NUEVO_COMENTARIO' | 'SLA_AVISO' | 'SLA_VENCIDO'
 
 export async function createNotification(
   usuarioId: string,
