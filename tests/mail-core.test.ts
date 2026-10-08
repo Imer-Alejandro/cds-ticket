@@ -5,6 +5,7 @@ import {
   stripTicketCode,
   nextTicketCode,
   emailBodyToText,
+  stripLegalFooter,
   normalizeFromAddress,
   slaStatus,
 } from '../src/lib/mail/core'
@@ -77,6 +78,48 @@ describe('emailBodyToText', () => {
   it('devuelve fallback si está vacío', () => {
     expect(emailBodyToText(null)).toBe('(Correo vacío)')
     expect(emailBodyToText({ text: '', html: '' } as any)).toBe('(Correo vacío)')
+  })
+})
+
+describe('stripLegalFooter', () => {
+  const footer = 'AVISO DE CONFIDENCIALIDAD\nLa información contenida en este correo es confidencial.'
+
+  it('recorta el aviso de confidencialidad y lo que sigue', () => {
+    const body = `Hola, adjunto el resumen.\n\n${footer}`
+    expect(stripLegalFooter(body)).toBe('Hola, adjunto el resumen.')
+  })
+
+  it('no distingue mayúsculas', () => {
+    expect(stripLegalFooter(`Cuerpo. ${footer.toLowerCase()}`)).toBe('Cuerpo.')
+  })
+
+  it('no modifica el texto sin marcador', () => {
+    const body = 'Hola, esto es una solicitud normal.'
+    expect(stripLegalFooter(body)).toBe(body)
+  })
+
+  it('recorta a partir de la primera coincidencia', () => {
+    expect(stripLegalFooter('Texto. \nAVISO DE CONFIDENCIALIDAD\nx\ny\nz')).toBe('Texto.')
+  })
+
+  it('tolera el marcador en inglés', () => {
+    expect(stripLegalFooter('Ok.\nCONFIDENTIALITY NOTICE\nMás texto')).toBe('Ok.')
+  })
+
+  it('devuelve vacío si el correo es solo el aviso', () => {
+    expect(stripLegalFooter(footer)).toBe('')
+  })
+})
+
+describe('emailBodyToText + pie de página', () => {
+  it('quita el aviso de confidencialidad del texto plano', () => {
+    const body = `Solicito acceso a la VPN.\n\nAVISO DE CONFIDENCIALIDAD\nLa información es confidencial.`
+    expect(emailBodyToText({ text: body } as any)).toBe('Solicito acceso a la VPN.')
+  })
+
+  it('quita el aviso de confidencialidad del HTML', () => {
+    const html = '<p>Necesito la impresora 2.</p><p><b>AVISO DE CONFIDENCIALIDAD</b><br>Confidencial.</p>'
+    expect(emailBodyToText({ text: '', html } as any)).toBe('Necesito la impresora 2.')
   })
 })
 

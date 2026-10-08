@@ -147,6 +147,30 @@ export function stripTicketCode(subject: string): string {
 }
 
 /**
+ * Marcadores de pie de página legal que se recortan del cuerpo del correo
+ * (p. ej. el aviso de confidencialidad de la empresa), para que no contaminen
+ * la descripción de los tickets ni los comentarios.
+ */
+export const FOOTER_MARKERS = ['aviso de confidencialidad', 'confidentiality notice']
+
+/**
+ * Elimina el pie de página legal del cuerpo de un correo recortando todo lo
+ * que aparezca a partir del primer marcador encontrado (sin distinción de
+ * mayúsculas). No modifica el texto cuando no hay marcador.
+ */
+export function stripLegalFooter(text: string): string {
+  if (!text) return ''
+  const lower = text.toLowerCase()
+  let cut = -1
+  for (const marker of FOOTER_MARKERS) {
+    const idx = lower.indexOf(marker)
+    if (idx !== -1 && (cut === -1 || idx < cut)) cut = idx
+  }
+  if (cut === -1) return text
+  return text.slice(0, cut).trimEnd()
+}
+
+/**
  * Genera el código secuencial siguiente de ticket de forma robusta.
  * No depende de un count() + 1 (que no es a prueba de concurrencia):
  * recibe la lista de códigos existentes y devuelve el máximo + 1.
@@ -180,7 +204,9 @@ export function emailBodyToText(email: Pick<ParsedMail, 'text' | 'html'> | null 
       .trim()
   }
   if (!text) return '(Correo vacío)'
-  return text.substring(0, maxLength)
+  const sinPie = stripLegalFooter(text)
+  if (!sinPie) return '(Correo vacío)'
+  return sinPie.substring(0, maxLength)
 }
 
 /**

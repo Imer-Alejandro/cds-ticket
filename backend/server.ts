@@ -10,7 +10,8 @@ dotenv.config({ path: '.env.local', override: true })
 
 const app = express()
 const httpServer = createServer(app)
-const port = parseInt(process.env.BACKEND_PORT || '3001', 10)
+// Plataformas (Railway/Render) inyectan PORT; fallback al clásico 3001 en local.
+const port = parseInt(process.env.BACKEND_PORT || process.env.PORT || '3001', 10)
 
 app.use(cors())
 app.use(express.json())
