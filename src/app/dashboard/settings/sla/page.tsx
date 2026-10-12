@@ -17,7 +17,7 @@ export default function SLAPage() {
   const [slas, setSlas] = useState<Sla[]>([])
   const [categories, setCategories] = useState<Categoria[]>([])
   const [loading, setLoading] = useState(true)
-  const [form, setForm] = useState({ categoriaId: "", prioridad: "MEDIA", minutosRespuesta: "60", minutosResolucion: "480" })
+  const [form, setForm] = useState({ categoriaId: "", prioridad: "MEDIA", horasRespuesta: "1", horasResolucion: "8" })
   const [isCreating, setIsCreating] = useState(false)
 
   useEffect(() => {
@@ -37,14 +37,14 @@ export default function SLAPage() {
         body: JSON.stringify({
           categoriaId: form.categoriaId,
           prioridad: form.prioridad,
-          minutosRespuesta: parseInt(form.minutosRespuesta),
-          minutosResolucion: parseInt(form.minutosResolucion),
+          minutosRespuesta: parseInt(form.horasRespuesta) * 60,
+          minutosResolucion: parseInt(form.horasResolucion) * 60,
         })
       })
       if (res.ok) {
         const data = await fetch("/api/sla").then(r => r.json())
         setSlas(data)
-        setForm({ categoriaId: "", prioridad: "MEDIA", minutosRespuesta: "60", minutosResolucion: "480" })
+        setForm({ categoriaId: "", prioridad: "MEDIA", horasRespuesta: "1", horasResolucion: "8" })
       }
     } finally { setIsCreating(false) }
   }
@@ -54,6 +54,8 @@ export default function SLAPage() {
     await fetch(`/api/sla/${id}`, { method: "DELETE" })
     setSlas(slas.filter(s => s.id !== id))
   }
+
+  const horasDe = (minutos: number) => (minutos % 60 === 0 ? minutos / 60 : Math.round((minutos / 60) * 100) / 100)
 
   const prioridadColor = (p: string) => {
     switch(p) {
@@ -96,8 +98,8 @@ export default function SLAPage() {
                       <TableCell>
                         <span className={`font-semibold ${prioridadColor(sla.prioridad)}`}>{sla.prioridad}</span>
                       </TableCell>
-                      <TableCell>{sla.minutosRespuesta} min</TableCell>
-                      <TableCell>{sla.minutosResolucion} min</TableCell>
+                      <TableCell>{horasDe(sla.minutosRespuesta)} h</TableCell>
+                      <TableCell>{horasDe(sla.minutosResolucion)} h</TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive"
                           onClick={() => handleDelete(sla.id)}>
@@ -138,14 +140,14 @@ export default function SLAPage() {
                 </select>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Tiempo de Respuesta (minutos)</label>
-                <Input type="number" min="1" value={form.minutosRespuesta}
-                  onChange={e => setForm({...form, minutosRespuesta: e.target.value})} required />
+                <label className="text-sm font-medium">Tiempo de Respuesta (horas)</label>
+                <Input type="number" min="1" step="1" value={form.horasRespuesta}
+                  onChange={e => setForm({...form, horasRespuesta: e.target.value})} required />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Tiempo de Resolución (minutos)</label>
-                <Input type="number" min="1" value={form.minutosResolucion}
-                  onChange={e => setForm({...form, minutosResolucion: e.target.value})} required />
+                <label className="text-sm font-medium">Tiempo de Resolución (horas)</label>
+                <Input type="number" min="1" step="1" value={form.horasResolucion}
+                  onChange={e => setForm({...form, horasResolucion: e.target.value})} required />
               </div>
               <Button type="submit" className="w-full gap-2" disabled={isCreating}>
                 <Plus className="h-4 w-4" />
