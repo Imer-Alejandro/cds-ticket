@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,7 @@ import {
   Send, Loader2, CheckCircle2, XCircle, ChevronRight, Ticket,
   Paperclip, Clock, UserCheck, Play, History, FileText,
   ChevronDown, Sparkles, Pencil, Pause, Trash2, Eye, Download,
-  ChevronLeft, Music,
+  ChevronLeft, Music, FileSpreadsheet, FileType,
 } from "lucide-react"
 
 interface AdjuntoData { id: string; nombre: string; tipo: string; url: string; data: string | null; tamaño: number | null }
@@ -765,6 +765,7 @@ export default function TicketDetailPage() {
       <Modal
         open={!!previewMedia}
         onClose={() => setPreviewMedia(null)}
+        size="xl"
         title={previewMedia?.lista[previewMedia.indice]?.nombre || "Vista previa"}
       >
         {previewMedia && (
@@ -807,6 +808,35 @@ export default function TicketDetailPage() {
 
 /* Componentes auxiliares */
 
+type TipoVista = 'image' | 'video' | 'audio' | 'pdf' | 'word' | 'excel' | 'text' | 'other'
+
+function extensionDe(nombre: string): string {
+  const i = nombre.lastIndexOf('.')
+  return i >= 0 ? nombre.slice(i + 1).toLowerCase() : ''
+}
+
+/** Determina cómo previsualizar un adjunto según el MIME y/o la extensión. */
+function tipoDeVista(a: AdjuntoData): TipoVista {
+  const tipo = (a.tipo || '').toLowerCase()
+  const ext = extensionDe(a.nombre)
+  if (tipo.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico'].includes(ext)) return 'image'
+  if (tipo.startsWith('video/') || ['mp4', 'webm', 'ogv', 'mov', 'avi', 'mkv', 'm4v'].includes(ext)) return 'video'
+  if (tipo.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus'].includes(ext)) return 'audio'
+  if (tipo === 'application/pdf' || ext === 'pdf') return 'pdf'
+  if (ext === 'docx' || tipo.includes('wordprocessingml')) return 'word'
+  if (['xlsx', 'xls', 'xlsm', 'xlsb', 'csv', 'tsv', 'ods'].includes(ext) || tipo.includes('spreadsheetml') || tipo.includes('ms-excel') || tipo === 'text/csv') return 'excel'
+  if (tipo.startsWith('text/') || ['txt', 'log', 'md', 'markdown', 'json', 'xml', 'html', 'htm', 'yml', 'yaml', 'ini', 'conf'].includes(ext)) return 'text'
+  return 'other'
+}
+
+/** Convierte una cadena base64 (sin prefijo data:) a bytes. */
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
 function mediaSrc(a: AdjuntoData): string {
   return a.data ? `data:${a.tipo};base64,${a.data}` : a.url
 }
@@ -823,32 +853,193 @@ function descargarAdjunto(a: AdjuntoData) {
   }
 }
 
-/** Render del archivo dentro del modal: imagen, video o audio. */
+/** Render del archivo dentro del modal: imagen, video, audio, PDF, Word, Excel o texto. */
 function AdjuntoVista({ a }: { a: AdjuntoData }) {
-  const src = mediaSrc(a)
-  if (a.tipo?.startsWith('video/')) {
-    return <video src={src} controls className="max-h-[70vh] max-w-full rounded-xl shadow-lg bg-black" />
+  const tipo = tipoDeVista(a)
+  if (tipo === 'video') {
+    return <video src={mediaSrc(a)} controls className="max-h-[70vh] max-w-full rounded-xl shadow-lg bg-black" />
   }
-  if (a.tipo?.startsWith('audio/')) {
+  if (tipo === 'audio') {
     return (
       <div className="flex flex-col items-center gap-3 py-6 px-4">
         <div className="h-16 w-16 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
           <Music className="h-8 w-8" />
         </div>
-        <audio src={src} controls className="w-[min(60vw,420px)]" />
+        <audio src={mediaSrc(a)} controls className="w-[min(60vw,420px)]" />
       </div>
     )
   }
-  if (a.tipo?.startsWith('image/')) {
-    return <img src={src} alt={a.nombre} className="max-h-[70vh] max-w-full rounded-xl object-contain shadow-lg" />
+  if (tipo === 'image') {
+    return <img src={mediaSrc(a)} alt={a.nombre} className="max-h-[70vh] max-w-full rounded-xl object-contain shadow-lg" />
   }
-  return null
+  if (tipo === 'pdf') return <PdfVista key={a.id} a={a} />
+  if (tipo === 'word') return <WordVista key={a.id} a={a} />
+  if (tipo === 'excel') return <ExcelVista key={a.id} a={a} />
+  if (tipo === 'text') return <TextoVista key={a.id} a={a} />
+  return <SinVistaPrevia a={a} />
+}
+
+/** Visor de PDF mediante blob URL (evita los límites de tamaño del data URI). */
+function PdfVista({ a }: { a: AdjuntoData }) {
+  const [url] = useState<string | null>(() => {
+    if (a.data) {
+      const blob = new Blob([base64ToBytes(a.data)], { type: 'application/pdf' })
+      return URL.createObjectURL(blob)
+    }
+    return a.url || null
+  })
+  useEffect(() => {
+    if (a.data && url) return () => URL.revokeObjectURL(url)
+  }, [url, a.data])
+  if (!url) return <MensajeCarga texto="No se pudo cargar el PDF." error />
+  return <iframe src={url} title={a.nombre} className="w-full h-[72vh] rounded-xl border border-border bg-white" />
+}
+
+/** Visor de documentos Word (.docx) convertidos a HTML con mammoth. */
+function WordVista({ a }: { a: AdjuntoData }) {
+  const [html, setHtml] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelado = false
+    ;(async () => {
+      try {
+        const mammothModule = await import('mammoth')
+        const mammoth = (mammothModule as unknown as { default?: typeof mammothModule }).default ?? mammothModule
+        const bytes = base64ToBytes(a.data as string)
+        const resultado = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer })
+        if (!cancelado) setHtml(resultado.value)
+      } catch {
+        if (!cancelado) setError('No se pudo convertir el documento de Word.')
+      }
+    })()
+    return () => { cancelado = true }
+  }, [a])
+  if (!a.data) return <MensajeCarga texto="El archivo no tiene contenido para mostrar." error />
+  if (error) return <MensajeCarga texto={error} error />
+  if (html === null) return <Cargando texto="Convirtiendo documento…" />
+  return (
+    <div
+      className="w-full max-h-[72vh] overflow-auto rounded-xl border border-border bg-white p-6 text-sm text-slate-800 [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:mt-3 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-slate-300 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-slate-100 [&_img]:max-w-full"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+}
+
+/** Visor de hojas de cálculo (.xlsx/.xls/.csv) mediante SheetJS. */
+function ExcelVista({ a }: { a: AdjuntoData }) {
+  const [hojas, setHojas] = useState<{ nombre: string; html: string }[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [activa, setActiva] = useState(0)
+  useEffect(() => {
+    let cancelado = false
+    ;(async () => {
+      try {
+        const xlsxModule = await import('xlsx')
+        const XLSX = (xlsxModule as unknown as { default?: typeof xlsxModule }).default ?? xlsxModule
+        const bytes = base64ToBytes(a.data as string)
+        const libro = XLSX.read(bytes, { type: 'array' })
+        const resultado = libro.SheetNames.map((nombre: string) => ({
+          nombre,
+          html: XLSX.utils.sheet_to_html(libro.Sheets[nombre]),
+        }))
+        if (!cancelado) setHojas(resultado)
+      } catch {
+        if (!cancelado) setError('No se pudo leer la hoja de cálculo.')
+      }
+    })()
+    return () => { cancelado = true }
+  }, [a])
+  if (!a.data) return <MensajeCarga texto="El archivo no tiene contenido para mostrar." error />
+  if (error) return <MensajeCarga texto={error} error />
+  if (hojas === null) return <Cargando texto="Leyendo hoja de cálculo…" />
+  if (hojas.length === 0) return <MensajeCarga texto="La hoja de cálculo está vacía." />
+  return (
+    <div className="w-full">
+      {hojas.length > 1 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {hojas.map((h, i) => (
+            <button
+              key={h.nombre}
+              type="button"
+              onClick={() => setActiva(i)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium border transition-colors cursor-pointer ${
+                i === activa ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/40 text-muted-foreground border-border hover:bg-muted'
+              }`}
+            >
+              {h.nombre}
+            </button>
+          ))}
+        </div>
+      )}
+      <div
+        className="max-h-[68vh] overflow-auto rounded-xl border border-border bg-white p-3 text-xs text-slate-800 [&_table]:border-collapse [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-slate-300 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-slate-100 [&_th]:font-semibold"
+        dangerouslySetInnerHTML={{ __html: hojas[activa]?.html || '' }}
+      />
+    </div>
+  )
+}
+
+/** Visor de texto plano (.txt/.log/.md/.json/etc.). */
+function TextoVista({ a }: { a: AdjuntoData }) {
+  const texto = useMemo(() => {
+    if (!a.data) return null
+    try {
+      return new TextDecoder('utf-8').decode(base64ToBytes(a.data))
+    } catch {
+      return null
+    }
+  }, [a])
+  if (texto === null) return <MensajeCarga texto="No se pudo leer el archivo de texto." error />
+  return (
+    <pre className="w-full max-h-[72vh] overflow-auto rounded-xl border border-border bg-muted/30 p-4 text-xs whitespace-pre-wrap break-words text-foreground">
+      {texto}
+    </pre>
+  )
+}
+
+function Cargando({ texto }: { texto: string }) {
+  return (
+    <div className="flex items-center justify-center gap-3 py-16 text-sm text-muted-foreground">
+      <Loader2 className="h-5 w-5 animate-spin" /> {texto}
+    </div>
+  )
+}
+
+function MensajeCarga({ texto, error }: { texto: string; error?: boolean }) {
+  return (
+    <div className={`flex flex-col items-center gap-2 py-12 text-sm text-center ${error ? 'text-rose-600' : 'text-muted-foreground'}`}>
+      <FileType className="h-8 w-8 opacity-50" />
+      {texto}
+    </div>
+  )
+}
+
+function SinVistaPrevia({ a }: { a: AdjuntoData }) {
+  return (
+    <div className="flex flex-col items-center gap-4 py-12 text-center">
+      <div className="h-14 w-14 rounded-2xl bg-muted flex items-center justify-center">
+        <FileText className="h-7 w-7 text-muted-foreground" />
+      </div>
+      <div>
+        <p className="text-sm font-medium">Vista previa no disponible</p>
+        <p className="text-xs text-muted-foreground mt-1">Descargá el archivo para abrirlo con una aplicación compatible.</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => descargarAdjunto(a)}
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline cursor-pointer"
+      >
+        <Download className="h-3.5 w-3.5" /> Descargar
+      </button>
+    </div>
+  )
 }
 
 function AdjuntoCard({ a, onPreview }: { a: AdjuntoData; onPreview?: () => void }) {
-  const isImg = a.tipo?.startsWith('image/')
-  const isVideo = a.tipo?.startsWith('video/')
-  const isAudio = a.tipo?.startsWith('audio/')
+  const tipo = tipoDeVista(a)
+  const isImg = tipo === 'image'
+  const isVideo = tipo === 'video'
+  const isAudio = tipo === 'audio'
   const download = () => descargarAdjunto(a)
   const preview = () => (onPreview ? onPreview() : download())
 
@@ -922,21 +1113,35 @@ function AdjuntoCard({ a, onPreview }: { a: AdjuntoData; onPreview?: () => void 
     )
   }
 
+  const puedePrevia = ['pdf', 'word', 'excel', 'text'].includes(tipo)
+  const Icono = tipo === 'excel' ? FileSpreadsheet : FileText
+
   return (
     <div className="group rounded-xl border border-border/60 bg-card p-3 shadow-xs hover:shadow-md transition-all w-44 sm:w-52 flex items-center gap-3 shrink-0">
       <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-        <FileText className="h-5 w-5" />
+        <Icono className="h-5 w-5" />
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-xs font-medium truncate text-foreground" title={a.nombre}>{a.nombre}</p>
         {a.tamaño && <p className="text-[10px] text-muted-foreground mt-0.5">{(a.tamaño / 1024).toFixed(0)} KB</p>}
-        <button
-          type="button"
-          onClick={download}
-          className="text-[11px] font-medium text-primary hover:underline flex items-center gap-1 mt-1 cursor-pointer"
-        >
-          <Download className="h-3 w-3" /> Descargar
-        </button>
+        <div className="flex items-center gap-3 mt-1">
+          {puedePrevia && onPreview && (
+            <button
+              type="button"
+              onClick={onPreview}
+              className="text-[11px] font-medium text-primary hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <Eye className="h-3 w-3" /> Ver
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={download}
+            className="text-[11px] font-medium text-muted-foreground hover:text-primary hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            <Download className="h-3 w-3" /> Descargar
+          </button>
+        </div>
       </div>
     </div>
   )

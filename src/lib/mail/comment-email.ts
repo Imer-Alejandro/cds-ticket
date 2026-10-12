@@ -6,6 +6,8 @@ export interface CommentRecipient {
   /** Nombre visible completo del destinatario. */
   nombre: string
   correo?: string | null
+  /** false cuando el usuario está eliminado/inactivo: no se le envía correo. */
+  activo?: boolean
 }
 
 export interface CommentNotifyTicket {
@@ -77,7 +79,7 @@ export function buildCommentEmailEvents(input: CommentNotifyInput): EmailEvent[]
   const adjuntos = input.adjuntos?.length ? { adjuntos: input.adjuntos } : {}
   const events: EmailEvent[] = []
 
-  if (input.solicitante?.correo && input.solicitante.id !== input.autorId) {
+  if (input.solicitante?.correo && input.solicitante.activo !== false && input.solicitante.id !== input.autorId) {
     events.push({
       type: 'NUEVO_COMENTARIO',
       to: input.solicitante.correo,
@@ -88,7 +90,7 @@ export function buildCommentEmailEvents(input: CommentNotifyInput): EmailEvent[]
       ...adjuntos,
     })
   }
-  if (input.agente?.correo && input.agente.id !== input.autorId) {
+  if (input.agente?.correo && input.agente.activo !== false && input.agente.id !== input.autorId) {
     events.push({
       type: 'NUEVO_COMENTARIO',
       to: input.agente.correo,

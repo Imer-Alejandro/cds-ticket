@@ -170,6 +170,7 @@ export async function POST(request: Request) {
                 id: solicitante.id,
                 nombre: `${solicitante.nombre} ${solicitante.apellido}`.trim() || solicitante.nombre,
                 correo: solicitante.correo,
+                activo: solicitante.activo,
               }
             : null,
           agente: agente
@@ -177,6 +178,7 @@ export async function POST(request: Request) {
                 id: agente.id,
                 nombre: `${agente.nombre} ${agente.apellido}`.trim() || agente.nombre,
                 correo: agente.correo,
+                activo: agente.activo,
               }
             : null,
           comentario: data.mensaje,

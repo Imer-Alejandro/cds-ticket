@@ -216,11 +216,11 @@ export async function POST(request: Request) {
       await createNotification(routing.supervisor.id, 'NUEVO_TICKET', `Nuevo ticket de tu equipo ${ticket.codigo}: ${ticket.asunto}`, ticket.id)
     }
 
-    let agenteAsignado: { id: string; nombre: string; apellido: string; correo?: string | null } | null = null
+    let agenteAsignado: { id: string; nombre: string; apellido: string; correo?: string | null; activo?: boolean } | null = null
     if (agenteIdAsignado) {
       agenteAsignado = await prisma.usuario.findUnique({
         where: { id: agenteIdAsignado },
-        select: { id: true, nombre: true, apellido: true, correo: true },
+        select: { id: true, nombre: true, apellido: true, correo: true, activo: true },
       })
       const nombreAgente = agenteAsignado ? `${agenteAsignado.nombre} ${agenteAsignado.apellido}`.trim() : agenteIdAsignado
       await prisma.logTicket.create({
@@ -259,7 +259,7 @@ export async function POST(request: Request) {
     // Email de acuse al solicitante (si es distinto de quien asigna y no es correo)
     try {
       const solicitante = await prisma.usuario.findUnique({ where: { id: ticket.solicitanteId } })
-      if (solicitante?.correo) {
+      if (solicitante?.correo && solicitante.activo !== false) {
         notifyByEmail({
           type: 'TICKET_CREADO',
           to: solicitante.correo,
@@ -272,7 +272,7 @@ export async function POST(request: Request) {
     }
 
     // Email de asignación al agente asignado
-    if (agenteAsignado?.correo) {
+    if (agenteAsignado?.correo && agenteAsignado.activo !== false) {
       try {
         notifyByEmail({
           type: 'TICKET_ASIGNADO',

@@ -32,6 +32,7 @@
     "jose": "^6.2.3",
     "lucide-react": "^1.21.0",
     "mailparser": "^3.9.11",
+    "mammoth": "^1.13.0",
     "next": "16.2.9",
     "nodemailer": "^9.0.1",
     "pg": "^8.22.0",

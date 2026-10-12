@@ -14,8 +14,8 @@ export interface TicketNotificacion {
   descripcion?: string | null
   estado: string
   nivelPrioridad: string
-  solicitante: { id: string; nombre: string; apellido: string; correo: string }
-  agente: { id: string; nombre: string; apellido?: string | null; correo: string } | null
+  solicitante: { id: string; nombre: string; apellido: string; correo: string; activo?: boolean }
+  agente: { id: string; nombre: string; apellido?: string | null; correo: string; activo?: boolean } | null
   messageId?: string | null
   threadRefs?: string | null
   ultimoMessageId?: string | null
@@ -26,7 +26,7 @@ export interface NotifyIngestDeps {
   findTicket(ticketId: string): Promise<TicketNotificacion | null>
   /** Agentes y administradores (posibles destinatarios de alertas). */
   findAgentes(): Promise<{ id: string; nombre: string }[]>
-  findAdministradores(): Promise<{ id: string; nombre: string; correo: string | null }[]>
+  findAdministradores(): Promise<{ id: string; nombre: string; correo: string | null; activo?: boolean }[]>
   notify(usuarioId: string, tipo: TipoNotificacion, mensaje: string, ticketId: string): Promise<void>
   sendEmail(ev: EmailEvent): void
   emit(ticket: { id: string; codigo: string; asunto: string }, action: 'nuevo' | 'comentario'): void
@@ -37,8 +37,8 @@ export const defaultNotifyDeps: NotifyIngestDeps = {
     prisma.ticket.findUnique({
       where: { id: ticketId },
       include: {
-        solicitante: { select: { id: true, nombre: true, apellido: true, correo: true } },
-        agente: { select: { id: true, nombre: true, apellido: true, correo: true } },
+        solicitante: { select: { id: true, nombre: true, apellido: true, correo: true, activo: true } },
+        agente: { select: { id: true, nombre: true, apellido: true, correo: true, activo: true } },
       },
     }),
   findAgentes: () =>
@@ -49,7 +49,7 @@ export const defaultNotifyDeps: NotifyIngestDeps = {
   findAdministradores: () =>
     prisma.usuario.findMany({
       where: { rol: { nombre: 'Administrador' } },
-      select: { id: true, nombre: true, correo: true },
+      select: { id: true, nombre: true, correo: true, activo: true },
     }),
   notify: (usuarioId, tipo, mensaje, ticketId) => createNotification(usuarioId, tipo, mensaje, ticketId),
   sendEmail: (ev) => notifyByEmail(ev),
@@ -80,21 +80,23 @@ export async function notifyIngestResult(
     for (const agente of agentes) {
       await deps.notify(agente.id, 'NUEVO_TICKET', `Nuevo ticket ${ticket.codigo}: ${ticket.asunto}`, ticket.id)
     }
-    deps.sendEmail({
-      type: 'TICKET_CREADO',
-      to: ticket.solicitante.correo,
-      nombre: ticket.solicitante.nombre,
-      data,
-      ...thread,
-    })
+    if (ticket.solicitante.correo && ticket.solicitante.activo !== false) {
+      deps.sendEmail({
+        type: 'TICKET_CREADO',
+        to: ticket.solicitante.correo,
+        nombre: ticket.solicitante.nombre,
+        data,
+        ...thread,
+      })
+    }
     deps.emit({ id: ticket.id, codigo: ticket.codigo, asunto: ticket.asunto }, 'nuevo')
     return
   }
 
   // Respuesta por correo: agente asignado + todos los administradores (sin duplicados).
-  const destinatarios = new Map<string, { id: string; nombre: string; correo: string | null }>()
+  const destinatarios = new Map<string, { id: string; nombre: string; correo: string | null; activo?: boolean }>()
   if (ticket.agente) {
-    destinatarios.set(ticket.agente.id, { id: ticket.agente.id, nombre: ticket.agente.nombre, correo: ticket.agente.correo })
+    destinatarios.set(ticket.agente.id, { id: ticket.agente.id, nombre: ticket.agente.nombre, correo: ticket.agente.correo, activo: ticket.agente.activo })
   }
   for (const admin of await deps.findAdministradores()) {
     if (!destinatarios.has(admin.id)) destinatarios.set(admin.id, admin)
@@ -103,7 +105,7 @@ export async function notifyIngestResult(
   const mensaje = `Nuevo comentario en ${ticket.codigo} (por correo)`
   for (const dest of destinatarios.values()) {
     await deps.notify(dest.id, 'NUEVO_COMENTARIO', mensaje, ticket.id)
-    if (dest.correo) {
+    if (dest.correo && dest.activo !== false) {
       deps.sendEmail({
         type: 'NUEVO_COMENTARIO',
         to: dest.correo,

@@ -241,7 +241,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
       if (data.agenteId && data.agenteId !== ticket.agenteId) {
         const agente = await prisma.usuario.findUnique({ where: { id: data.agenteId } })
-        if (agente?.correo) {
+        if (agente?.correo && agente.activo !== false) {
           notifyByEmail({
             type: 'TICKET_ASIGNADO',
             to: agente.correo,
@@ -254,7 +254,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
       if (data.estado) {
         const solicitante = await prisma.usuario.findUnique({ where: { id: ticket.solicitanteId } })
-        if (solicitante?.correo) {
+        if (solicitante?.correo && solicitante.activo !== false) {
           notifyByEmail({
             type: 'ESTADO_CAMBIADO',
             to: solicitante.correo,

@@ -15,6 +15,7 @@ interface Destinatario {
   nombre: string
   apellido: string
   correo: string | null
+  activo?: boolean
 }
 
 interface SlaTicketRow {
@@ -28,8 +29,8 @@ interface SlaTicketRow {
   fechaPrimeraRespuesta: Date | null
   fechaResolucion: Date | null
   sla: { minutosRespuesta: number; minutosResolucion: number } | null
-  agente: { id: string; nombre: string; apellido: string; correo: string | null } | null
-  supervisor: { id: string; nombre: string; apellido: string; correo: string | null } | null
+  agente: { id: string; nombre: string; apellido: string; correo: string | null; activo?: boolean } | null
+  supervisor: { id: string; nombre: string; apellido: string; correo: string | null; activo?: boolean } | null
 }
 
 const ETIQUETA_EVENTO: Record<SlaEventType, string> = {
@@ -75,8 +76,8 @@ async function runCheck(): Promise<number> {
       fechaPrimeraRespuesta: true,
       fechaResolucion: true,
       sla: { select: { minutosRespuesta: true, minutosResolucion: true } },
-      agente: { select: { id: true, nombre: true, apellido: true, correo: true } },
-      supervisor: { select: { id: true, nombre: true, apellido: true, correo: true } },
+      agente: { select: { id: true, nombre: true, apellido: true, correo: true, activo: true } },
+      supervisor: { select: { id: true, nombre: true, apellido: true, correo: true, activo: true } },
     },
   })) as SlaTicketRow[]
 
@@ -127,7 +128,7 @@ function enviarCorreo(destinatarios: Destinatario[], t: SlaTicketRow, evento: Sl
   const detalle = detalleDeEvento(evento, t.sla)
   const alerta = evento === 'AVISO_RESPUESTA' ? 'Aviso previo de respuesta' : evento === 'VENCIDO_RESPUESTA' ? 'Plazo de respuesta vencido' : 'Plazo de resolución vencido'
   for (const d of destinatarios) {
-    if (!d.correo) continue
+    if (!d.correo || d.activo === false) continue
     try {
       const { subject, html } = slaAvisoEmail(`${d.nombre} ${d.apellido}`.trim(), {
         ...mailData,

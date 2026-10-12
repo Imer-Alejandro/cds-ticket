@@ -97,9 +97,13 @@ export function stopMailListener() {
 export async function sendEmailReply(ticketId: string, message: string) {
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
-    include: { solicitante: { select: { nombre: true, correo: true } } },
+    include: { solicitante: { select: { nombre: true, correo: true, activo: true } } },
   })
   if (!ticket) throw new Error('Ticket not found')
+  if (ticket.solicitante.activo === false) {
+    console.warn(`[Mail] Respuesta no enviada: el solicitante de ${ticket.codigo} está inactivo`)
+    return false
+  }
 
   notifyByEmail({
     type: 'NUEVO_COMENTARIO',

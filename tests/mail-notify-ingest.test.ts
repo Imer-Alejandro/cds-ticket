@@ -136,4 +136,27 @@ describe('notifyIngestResult', () => {
     expect(deps.sendEmail).not.toHaveBeenCalled()
     expect(deps.emit).not.toHaveBeenCalled()
   })
+
+  it('ticket nuevo: no envía acuse al solicitante inactivo (eliminado)', async () => {
+    const deps = makeDeps({
+      findTicket: vi.fn(async () => makeTicket({ solicitante: { id: 'u-sol', nombre: 'Juan', apellido: 'Pérez', correo: 'juan@x.com', activo: false } })),
+    })
+
+    await notifyIngestResult({ kind: 'new', ticketId: 'ticket-1', codigo: 'TK-00045' }, deps)
+
+    expect(deps.sendEmail).not.toHaveBeenCalled()
+    expect(deps.emit).toHaveBeenCalled()
+  })
+
+  it('respuesta por correo: omite email a destinatarios inactivos', async () => {
+    const deps = makeDeps({
+      findTicket: vi.fn(async () => makeTicket({ agente: { id: 'u-agt', nombre: 'Ana', correo: 'ana@x.com', activo: false } })),
+      findAdministradores: vi.fn(async () => [{ id: 'u-adm', nombre: 'Admin', correo: 'admin@x.com', activo: false }]),
+    })
+
+    await notifyIngestResult({ kind: 'reply', ticketId: 'ticket-1', codigo: 'TK-00045' }, deps)
+
+    expect(deps.notify).toHaveBeenCalledTimes(2)
+    expect(deps.sendEmail).not.toHaveBeenCalled()
+  })
 })

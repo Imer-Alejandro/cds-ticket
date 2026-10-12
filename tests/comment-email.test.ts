@@ -90,6 +90,25 @@ describe('buildCommentEmailEvents', () => {
     expect(events[0].to).toBe('ana@x.com')
   })
 
+  it('no notifica a destinatarios inactivos (eliminados)', () => {
+    const events = buildCommentEmailEvents(
+      makeInput({
+        autorId: 'u-otro',
+        solicitante: { ...SOLICITANTE, activo: false },
+        agente: { ...AGENTE, activo: false },
+      })
+    )
+    expect(events).toEqual([])
+  })
+
+  it('notifica solo a los destinatarios activos', () => {
+    const events = buildCommentEmailEvents(
+      makeInput({ autorId: 'u-otro', solicitante: { ...SOLICITANTE, activo: false } })
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0].to).toBe('ana@x.com')
+  })
+
   it('ticket sin hilo de correo: envía sin cabeceras (fallback del remitente)', () => {
     const events = buildCommentEmailEvents(
       makeInput({
