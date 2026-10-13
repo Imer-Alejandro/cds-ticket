@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { ESTADOS_ACTIVOS } from '@/lib/tickets'
 
 export async function GET() {
   try {
@@ -8,14 +9,15 @@ export async function GET() {
     if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
     const userId = session.id as string
+    // Solo cuentan tickets activos: Eliminado, Resuelto y Cerrado no se reflejan.
     const [misActivos, noAsignados, nuevos] = await Promise.all([
       prisma.ticket.count({
         where: {
           agenteId: userId,
-          estado: { notIn: ['CERRADO', 'RESUELTO'] },
+          estado: { in: ESTADOS_ACTIVOS },
         },
       }),
-      prisma.ticket.count({ where: { agenteId: null } }),
+      prisma.ticket.count({ where: { agenteId: null, estado: { in: ESTADOS_ACTIVOS } } }),
       prisma.ticket.count({ where: { estado: 'NUEVO' } }),
     ])
 
