@@ -3,6 +3,7 @@ import { buildCommentEmailEvents, threadHeadersFromTicket } from '../src/lib/mai
 import type { CommentNotifyInput } from '../src/lib/mail/comment-email'
 
 const TICKET = {
+  id: 't-1',
   codigo: 'TK-00045',
   asunto: 'Laptop no enciende',
   estado: 'EN_PROGRESO',
@@ -131,6 +132,11 @@ describe('buildCommentEmailEvents', () => {
   it('sin adjuntos los eventos no llevan la clave adjuntos', () => {
     const events = buildCommentEmailEvents(makeInput())
     expect(events[0].adjuntos).toBeUndefined()
+  })
+
+  it('propaga el id del ticket para guardar el hilo saliente', () => {
+    const events = buildCommentEmailEvents(makeInput())
+    expect(events[0].ticketId).toBe('t-1')
   })
 })
 

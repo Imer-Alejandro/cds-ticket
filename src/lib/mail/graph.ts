@@ -9,6 +9,20 @@ export interface GraphMailInput {
   attachments?: EmailAttachment[]
 }
 
+/** Identificadores que Graph asigna al mensaje realmente enviado. */
+export interface GraphSendResult {
+  /** Message-ID RFC 5322 del mensaje enviado (con o sin <>). */
+  internetMessageId?: string
+  /** Conversación (hilo) a la que pertenece el mensaje enviado. */
+  conversationId?: string
+}
+
+interface GraphMessage {
+  id?: string
+  internetMessageId?: string
+  conversationId?: string
+}
+
 const GRAPH_API = 'https://graph.microsoft.com/v1.0'
 
 /** Adjuntos en el formato de fileAttachment que entiende Graph. */
@@ -22,6 +36,18 @@ function graphAttachments(attachments?: EmailAttachment[]) {
   }))
 }
 
+/** Cuerpo `message` que acepta tanto /me/messages como createReply. */
+function buildMessage(mail: GraphMailInput) {
+  const message: Record<string, unknown> = {
+    subject: mail.subject,
+    body: { contentType: 'HTML', content: mail.html },
+    toRecipients: [{ emailAddress: { address: mail.to } }],
+  }
+  const attachments = graphAttachments(mail.attachments)
+  if (attachments) message.attachments = attachments
+  return message
+}
+
 /**
  * Envía un correo por Microsoft Graph. Se usa cuando la configuración es OAuth2
  * porque los tenants corporativos suelen tener SMTP AUTH bloqueado
@@ -30,38 +56,72 @@ function graphAttachments(attachments?: EmailAttachment[]) {
  * Graph NO acepta In-Reply-To/References en `internetMessageHeaders` (400
  * InvalidInternetMessageHeader, solo cabeceras `x-`), así que el hilo de
  * conversación se conserva con el flujo nativo: si el mensaje referenciado
- * existe en el buzón se responde con `createReply` + `send` (Exchange construye
- * los encadenados); si no, se envía un mensaje nuevo sin hilo.
+ * existe en el buzón se responde con `createReply` (Exchange construye los
+ * encadenados); si no, se crea un mensaje nuevo.
+ *
+ * En ambos casos se devuelve el `internetMessageId` del mensaje enviado para
+ * poder guardarlo en el ticket y encadenar los correos siguientes.
  */
 export async function sendEmailViaGraph(
   accessToken: string,
   mail: GraphMailInput,
-): Promise<void> {
-  const message: Record<string, unknown> = {
-    subject: mail.subject,
-    body: { contentType: 'HTML', content: mail.html },
-    toRecipients: [{ emailAddress: { address: mail.to } }],
-  }
-  const attachments = graphAttachments(mail.attachments)
-  if (attachments) message.attachments = attachments
+): Promise<GraphSendResult> {
+  const message = buildMessage(mail)
 
   const candidates = extractTicketCode(mail.subject) ? threadCandidates(mail.headers) : []
   const targetId = candidates.length ? await findThreadMessageId(accessToken, candidates) : null
 
   if (targetId) {
-    const draft = await postGraph(accessToken, `${GRAPH_API}/me/messages/${targetId}/createReply`, { message })
-    if (!draft.id) {
+    const draft = await graphRequest<GraphMessage>(
+      accessToken,
+      `${GRAPH_API}/me/messages/${targetId}/createReply`,
+      'POST',
+      { message },
+    )
+    if (!draft?.id) {
       throw new Error('Microsoft Graph no devolvió el borrador de respuesta')
     }
-    await postGraph(accessToken, `${GRAPH_API}/me/messages/${draft.id}/send`, {})
-    return
+    const ids = await sentIds(accessToken, draft)
+    await graphRequest(accessToken, `${GRAPH_API}/me/messages/${draft.id}/send`, 'POST', {})
+    return ids
   }
 
   if (candidates.length) {
     console.warn(`[Mail] No se encontró el mensaje del hilo en el buzón (${candidates[0]}); se envía sin encadenar`)
   }
 
-  await postGraph(accessToken, `${GRAPH_API}/me/sendMail`, { message, saveToSentItems: true })
+  // Se crea como borrador (en vez de sendMail) para conocer el id del mensaje
+  // y poder leer su internetMessageId: es el ancla para encadenar respuestas.
+  const created = await graphRequest<GraphMessage>(accessToken, `${GRAPH_API}/me/messages`, 'POST', message)
+  if (!created?.id) {
+    throw new Error('Microsoft Graph no devolvió el mensaje creado')
+  }
+  const ids = await sentIds(accessToken, created)
+  await graphRequest(accessToken, `${GRAPH_API}/me/messages/${created.id}/send`, 'POST', {})
+  return ids
+}
+
+/**
+ * Lee los identificadores del mensaje (borrador) antes de enviarlo. La respuesta de creación suele
+ * traerlos; si no, se consultan por id (una sola petición).
+ */
+async function sentIds(accessToken: string, msg: GraphMessage): Promise<GraphSendResult> {
+  if (msg.internetMessageId || !msg.id) {
+    return { internetMessageId: msg.internetMessageId, conversationId: msg.conversationId }
+  }
+  try {
+    const fresh = await graphRequest<GraphMessage>(
+      accessToken,
+      `${GRAPH_API}/me/messages/${msg.id}?$select=internetMessageId,conversationId`,
+      'GET',
+    )
+    return {
+      internetMessageId: fresh?.internetMessageId ?? msg.internetMessageId,
+      conversationId: fresh?.conversationId ?? msg.conversationId,
+    }
+  } catch {
+    return { conversationId: msg.conversationId }
+  }
 }
 
 /**
@@ -91,39 +151,40 @@ async function findThreadMessageId(accessToken: string, candidates: string[]): P
       .slice(0, 3)
       .map((id) => `internetMessageId eq '${encodeURIComponent(`<${id}>`)}'`)
       .join(' or ')
-    const response = await fetch(
+    const response = await graphRequest<{ value?: { id?: string }[] }>(
+      accessToken,
       `${GRAPH_API}/me/messages?$filter=${filter}&$select=id&$top=1`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      'GET',
     )
-    if (!response.ok) {
-      console.warn(`[Mail] Graph no pudo buscar el mensaje del hilo (${response.status})`)
-      return null
-    }
-    const body = await response.json() as { value?: { id?: string }[] }
-    return body.value?.[0]?.id ?? null
-  } catch (error) {
-    console.warn('[Mail] Graph falló al buscar el mensaje del hilo:', error instanceof Error ? error.message : error)
+    return response?.value?.[0]?.id ?? null
+  } catch {
     return null
   }
 }
 
-async function postGraph(accessToken: string, url: string, payload: unknown): Promise<{ id?: string }> {
+/** Petición Graph con manejo uniforme de errores. Devuelve el JSON o lanza. */
+async function graphRequest<T = Record<string, unknown>>(
+  accessToken: string,
+  url: string,
+  method: 'GET' | 'POST' | 'PATCH',
+  body?: unknown,
+): Promise<T> {
   const response = await fetch(url, {
-    method: 'POST',
+    method,
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
-    body: JSON.stringify(payload),
+    body: body ? JSON.stringify(body) : undefined,
   })
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as
+    const errBody = await response.json().catch(() => null) as
       | { error?: { code?: string; message?: string } }
       | null
-    const code = body?.error?.code ? ` ${body.error.code}` : ''
+    const code = errBody?.error?.code ? ` ${errBody.error.code}` : ''
     throw new Error(
-      `Microsoft Graph rechazó la operación (${response.status}${code}): ${body?.error?.message || 'sin detalle'}`,
+      `Microsoft Graph rechazó la operación (${response.status}${code}): ${errBody?.error?.message || 'sin detalle'}`,
     )
   }
-  return await response.json().catch(() => ({ id: undefined })) as { id?: string }
+  return await response.json().catch(() => ({} as T)) as T
 }

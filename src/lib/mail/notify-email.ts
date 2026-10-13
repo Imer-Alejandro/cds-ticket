@@ -26,6 +26,10 @@ export type EmailEvent = (
   EmailThreadHeaders & {
     /** Adjuntos del comentario (base64) que viajan como archivos del correo. */
     adjuntos?: EmailAttachment[]
+    /** Ticket al que pertenece el correo (para guardar el Message-ID saliente). */
+    ticketId?: string
+    /** true solo en el acuse inicial: fija el ancla de la conversación del ticket. */
+    ticketRoot?: boolean
   }
 
 /**
@@ -60,6 +64,8 @@ export function buildEmailMessage(ev: EmailEvent): EmailMessage {
     inReplyTo: ev.inReplyTo ?? undefined,
     references: ev.references ?? undefined,
     attachments: ev.adjuntos?.length ? ev.adjuntos : undefined,
+    ticketId: ev.ticketId,
+    ticketRoot: ev.ticketRoot,
   }
 }
 

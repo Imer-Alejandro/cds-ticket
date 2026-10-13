@@ -265,6 +265,8 @@ export async function POST(request: Request) {
           to: solicitante.correo,
           nombre: `${solicitante.nombre} ${solicitante.apellido}`.trim(),
           data: mailData,
+          ticketId: ticket.id,
+          ticketRoot: true,
         })
       }
     } catch {
@@ -279,6 +281,7 @@ export async function POST(request: Request) {
           to: agenteAsignado.correo,
           agenteNombre: `${agenteAsignado.nombre} ${agenteAsignado.apellido}`.trim(),
           data: mailData,
+          ticketId: ticket.id,
         })
       } catch {
         // no romper la creación

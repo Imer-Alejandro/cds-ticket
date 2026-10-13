@@ -11,6 +11,7 @@ import { useAuthStore } from "@/store/useAuthStore"
 import { apiFetch } from "@/lib/api"
 import { useSocket, onNotificacion } from "@/hooks/useSocket"
 import { playNotificationSound } from "@/lib/sound"
+import { showPush } from "@/lib/push"
 import { EstadoBadge, PrioridadBadge } from "@/components/tickets/badges"
 import { SlaBar } from "@/components/tickets/SlaBar"
 import { KanbanBoard, KanbanToggle, type KanbanTicket } from "@/components/tickets/KanbanBoard"
@@ -130,6 +131,11 @@ function TicketsContent() {
       if (data?.ticket?.id) {
         setHighlightedId(data.ticket.id)
         playNotificationSound()
+        showPush("Nuevo ticket", {
+          body: data.ticket.codigo,
+          url: `/tickets/${data.ticket.id}`,
+          tag: data.ticket.id,
+        })
         setTimeout(() => setHighlightedId(null), 2500)
         refetch()
       }

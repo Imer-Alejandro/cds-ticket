@@ -111,6 +111,7 @@ export async function sendEmailReply(ticketId: string, message: string) {
     nombre: ticket.solicitante.nombre,
     data: toTicketEmailData({ ...ticket, descripcion: ticket.descripcion }),
     comentario: message,
+    ticketId: ticket.id,
     ...threadHeadersFromTicket(ticket),
   })
   return true

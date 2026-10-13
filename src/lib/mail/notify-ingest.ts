@@ -86,6 +86,8 @@ export async function notifyIngestResult(
         to: ticket.solicitante.correo,
         nombre: ticket.solicitante.nombre,
         data,
+        ticketId: ticket.id,
+        ticketRoot: true,
         ...thread,
       })
     }
@@ -112,6 +114,7 @@ export async function notifyIngestResult(
         nombre: dest.nombre,
         data,
         comentario: emailComentario,
+        ticketId: ticket.id,
         ...thread,
       })
     }

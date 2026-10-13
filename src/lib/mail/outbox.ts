@@ -23,6 +23,10 @@ export interface EmailMessage {
   references?: string | null
   /** Adjuntos opcionales (archivos binarios en base64). */
   attachments?: EmailAttachment[]
+  /** Ticket al que pertenece el correo: permite persistir el hilo saliente. */
+  ticketId?: string
+  /** true solo en el acuse inicial: es el ancla de la conversación del ticket. */
+  ticketRoot?: boolean
 }
 
 export type SendFn = (msg: EmailMessage) => Promise<void>

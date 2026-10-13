@@ -82,26 +82,34 @@ function stubFetch(...results: StubResult[]) {
   return calls
 }
 
-function parsedBody(call: FetchCall) {
-  return JSON.parse(call.body || '{}') as {
-    message?: {
-      subject?: string
-      body?: { contentType?: string; content?: string }
-      toRecipients?: { emailAddress?: { address?: string } }[]
-      internetMessageHeaders?: { name?: string; value?: string }[]
-      attachments?: {
-        '@odata.type'?: string
-        name?: string
-        contentType?: string
-        contentBytes?: string
-      }[]
-    }
-    saveToSentItems?: boolean
-  }
+interface GraphMessagePayload {
+  id?: string
+  internetMessageId?: string
+  conversationId?: string
+  subject?: string
+  body?: { contentType?: string; content?: string }
+  toRecipients?: { emailAddress?: { address?: string } }[]
+  attachments?: {
+    '@odata.type'?: string
+    name?: string
+    contentType?: string
+    contentBytes?: string
+  }[]
 }
 
-function headerValue(body: ReturnType<typeof parsedBody>, name: string) {
-  return body.message?.internetMessageHeaders?.find((h) => h.name === name)?.value
+interface GraphRequestBody {
+  message?: GraphMessagePayload
+  saveToSentItems?: boolean
+}
+
+function parsedBody(call: FetchCall): Record<string, unknown> {
+  return JSON.parse(call.body || '{}') as Record<string, unknown>
+}
+
+/** El mensaje puede venir en el nivel raíz (/me/messages) o dentro de `message` (createReply). */
+function payloadOf(call: FetchCall): GraphMessagePayload {
+  const body = parsedBody(call)
+  return (body.message ?? body) as GraphMessagePayload
 }
 
 beforeEach(() => {
@@ -117,37 +125,41 @@ afterEach(() => {
 })
 
 describe('sendEmailViaGraph', () => {
-  it('envía mensaje nuevo a /me/sendMail cuando no hay código de ticket', async () => {
-    const calls = stubFetch({ status: 202, body: {} })
+  it('sin código de ticket crea el mensaje y devuelve su internetMessageId', async () => {
+    const calls = stubFetch(
+      { status: 201, body: { id: 'MSG-1', internetMessageId: '<nuevo@empresa.com>', conversationId: 'conv-1' } },
+      { status: 202, body: {} },
+    )
 
-    await sendEmailViaGraph('AT_G', {
+    const result = await sendEmailViaGraph('AT_G', {
       to: 'cliente@empresa.com',
       subject: 'Reunión semanal',
       html: '<p>Hola</p>',
     })
 
-    expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe('https://graph.microsoft.com/v1.0/me/sendMail')
+    expect(calls).toHaveLength(2)
+    expect(calls[0].url).toBe('https://graph.microsoft.com/v1.0/me/messages')
     expect(calls[0].method).toBe('POST')
     expect(calls[0].auth).toBe('Bearer AT_G')
 
-    const body = parsedBody(calls[0])
-    expect(body.saveToSentItems).toBe(true)
-    expect(body.message?.subject).toBe('Reunión semanal')
-    expect(body.message?.body).toEqual({ contentType: 'HTML', content: '<p>Hola</p>' })
-    expect(body.message?.toRecipients).toEqual([{ emailAddress: { address: 'cliente@empresa.com' } }])
-    expect(body.message?.internetMessageHeaders).toBeUndefined()
-    expect(headerValue(body, 'In-Reply-To')).toBeUndefined()
+    const msg = messageOf(calls[0])
+    expect(msg.subject).toBe('Reunión semanal')
+    expect(msg.body).toEqual({ contentType: 'HTML', content: '<p>Hola</p>' })
+    expect(msg.toRecipients).toEqual([{ emailAddress: { address: 'cliente@empresa.com' } }])
+
+    expect(calls[1].url).toBe('https://graph.microsoft.com/v1.0/me/messages/MSG-1/send')
+    expect(result.internetMessageId).toBe('<nuevo@empresa.com>')
+    expect(result.conversationId).toBe('conv-1')
   })
 
   it('responde con createReply cuando el mensaje del hilo existe en el buzón', async () => {
     const calls = stubFetch(
       { body: { value: [{ id: 'GRAPH-MSG-1' }] } },
-      { status: 201, body: { id: 'BORRADOR-1' } },
+      { status: 201, body: { id: 'BORRADOR-1', internetMessageId: '<resp@empresa.com>', conversationId: 'conv-9' } },
       { status: 202, body: {} },
     )
 
-    await sendEmailViaGraph('AT_G', {
+    const result = await sendEmailViaGraph('AT_G', {
       to: 'cliente@empresa.com',
       subject: '[TK-99999] Re: consulta',
       html: '<p>Respuesta</p>',
@@ -160,18 +172,22 @@ describe('sendEmailViaGraph', () => {
     expect(calls[1].url).toBe('https://graph.microsoft.com/v1.0/me/messages/GRAPH-MSG-1/createReply')
     expect(calls[1].method).toBe('POST')
 
-    const draft = parsedBody(calls[1])
-    expect(draft.message?.subject).toBe('[TK-99999] Re: consulta')
-    expect(draft.message?.body).toEqual({ contentType: 'HTML', content: '<p>Respuesta</p>' })
-    expect(draft.message?.toRecipients).toEqual([{ emailAddress: { address: 'cliente@empresa.com' } }])
-    expect(draft.message?.internetMessageHeaders).toBeUndefined()
+    const draft = messageOf(calls[1])
+    expect(draft.subject).toBe('[TK-99999] Re: consulta')
+    expect(draft.body).toEqual({ contentType: 'HTML', content: '<p>Respuesta</p>' })
+    expect(draft.toRecipients).toEqual([{ emailAddress: { address: 'cliente@empresa.com' } }])
 
     expect(calls[2].url).toBe('https://graph.microsoft.com/v1.0/me/messages/BORRADOR-1/send')
+    expect(result.internetMessageId).toBe('<resp@empresa.com>')
   })
 
-  it('si el mensaje del hilo no está en el buzón envía sin encadenar y lo advierte', async () => {
+  it('si el mensaje del hilo no está en el buzón crea un mensaje y lo advierte', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const calls = stubFetch({ body: { value: [] } }, { status: 202, body: {} })
+    const calls = stubFetch(
+      { body: { value: [] } },
+      { status: 201, body: { id: 'MSG-2', internetMessageId: '<x@empresa.com>' } },
+      { status: 202, body: {} },
+    )
 
     await sendEmailViaGraph('AT_G', {
       to: 'cliente@empresa.com',
@@ -180,14 +196,17 @@ describe('sendEmailViaGraph', () => {
       headers: { inReplyTo: 'tk-12345-root@empresa.com' },
     })
 
-    expect(calls).toHaveLength(2)
-    expect(calls[1].url).toBe('https://graph.microsoft.com/v1.0/me/sendMail')
-    expect(parsedBody(calls[1]).message?.internetMessageHeaders).toBeUndefined()
+    expect(calls).toHaveLength(3)
+    expect(calls[1].url).toBe('https://graph.microsoft.com/v1.0/me/messages')
+    expect(calls[2].url).toBe('https://graph.microsoft.com/v1.0/me/messages/MSG-2/send')
     expect(console.warn).toHaveBeenCalled()
   })
 
-  it('con código de ticket pero sin cabeceras de hilo no busca y envía directo', async () => {
-    const calls = stubFetch({ status: 202, body: {} })
+  it('con código de ticket pero sin cabeceras de hilo no busca y crea directo', async () => {
+    const calls = stubFetch(
+      { status: 201, body: { id: 'MSG-3', internetMessageId: '<x@empresa.com>' } },
+      { status: 202, body: {} },
+    )
 
     await sendEmailViaGraph('AT_G', {
       to: 'cliente@empresa.com',
@@ -195,8 +214,27 @@ describe('sendEmailViaGraph', () => {
       html: '<p>x</p>',
     })
 
-    expect(calls).toHaveLength(1)
-    expect(calls[0].url).toContain('/sendMail')
+    expect(calls).toHaveLength(2)
+    expect(calls[0].url).toBe('https://graph.microsoft.com/v1.0/me/messages')
+  })
+
+  it('consulta el internetMessageId si la creación no lo trae', async () => {
+    const calls = stubFetch(
+      { status: 201, body: { id: 'MSG-4' } },
+      { body: { internetMessageId: '<leido@empresa.com>', conversationId: 'conv-4' } },
+      { status: 202, body: {} },
+    )
+
+    const result = await sendEmailViaGraph('AT_G', {
+      to: 'cliente@empresa.com',
+      subject: 'Sin id',
+      html: '<p>x</p>',
+    })
+
+    expect(calls).toHaveLength(3)
+    expect(calls[1].url).toContain('/me/messages/MSG-4?$select=internetMessageId,conversationId')
+    expect(calls[2].url).toBe('https://graph.microsoft.com/v1.0/me/messages/MSG-4/send')
+    expect(result.internetMessageId).toBe('<leido@empresa.com>')
   })
 
   it('propaga el error que devuelve Microsoft Graph', async () => {
@@ -227,8 +265,11 @@ describe('sendEmailViaGraph', () => {
     ).rejects.toThrow(/403 ErrorAccessDenied/)
   })
 
-  it('incluye los adjuntos como fileAttachment en sendMail', async () => {
-    const calls = stubFetch({ status: 202, body: {} })
+  it('incluye los adjuntos como fileAttachment en el mensaje creado', async () => {
+    const calls = stubFetch(
+      { status: 201, body: { id: 'MSG-A', internetMessageId: '<a@empresa.com>' } },
+      { status: 202, body: {} },
+    )
 
     await sendEmailViaGraph('AT_G', {
       to: 'cliente@empresa.com',
@@ -237,8 +278,8 @@ describe('sendEmailViaGraph', () => {
       attachments: [{ nombre: 'captura.png', tipo: 'image/png', data: 'QUJD' }],
     })
 
-    expect(calls).toHaveLength(1)
-    expect(parsedBody(calls[0]).message?.attachments).toEqual([
+    expect(calls).toHaveLength(2)
+    expect(messageOf(calls[0]).attachments).toEqual([
       {
         '@odata.type': '#microsoft.graph.fileAttachment',
         name: 'captura.png',
@@ -251,7 +292,7 @@ describe('sendEmailViaGraph', () => {
   it('incluye los adjuntos en la respuesta createReply', async () => {
     const calls = stubFetch(
       { body: { value: [{ id: 'GRAPH-MSG-1' }] } },
-      { status: 201, body: { id: 'BORRADOR-1' } },
+      { status: 201, body: { id: 'BORRADOR-1', internetMessageId: '<r@empresa.com>' } },
       { status: 202, body: {} },
     )
 
@@ -263,7 +304,7 @@ describe('sendEmailViaGraph', () => {
       attachments: [{ nombre: 'log.txt', tipo: 'text/plain', data: 'aG9sYQ==' }],
     })
 
-    expect(parsedBody(calls[1]).message?.attachments).toEqual([
+    expect(messageOf(calls[1]).attachments).toEqual([
       {
         '@odata.type': '#microsoft.graph.fileAttachment',
         name: 'log.txt',
@@ -271,20 +312,24 @@ describe('sendEmailViaGraph', () => {
         contentBytes: 'aG9sYQ==',
       },
     ])
-    expect(calls[2].url).toBe('https://graph.microsoft.com/v1.0/me/messages/BORRADOR-1/send')
-  })
-
-  it('sin adjuntos no se envía la clave attachments', async () => {
-    const calls = stubFetch({ status: 202, body: {} })
-
-    await sendEmailViaGraph('AT_G', { to: 'a@b.c', subject: 'x', html: '<p>x</p>' })
-
-    expect(parsedBody(calls[0]).message?.attachments).toBeUndefined()
   })
 })
 
+/** Devuelve el payload del mensaje (top-level o dentro de `message`). */
+function messageOf(call: FetchCall) {
+  const body = JSON.parse(call.body || '{}') as { message?: Record<string, unknown> } & Record<string, unknown>
+  return (body.message ?? body) as TemplateBody
+}
+
+interface TemplateBody {
+  subject?: string
+  body?: { contentType?: string; content?: string }
+  toRecipients?: { emailAddress?: { address?: string } }[]
+  attachments?: { '@odata.type'?: string; name?: string; contentType?: string; contentBytes?: string }[]
+}
+
 describe('getMicrosoftGraphAccessToken', () => {
-  it('usa el scope Mail.Send de Graph y persiste el refresh token rotado', async () => {
+  it('pide el scope de Graph con envío y lectura/escritura', async () => {
     const calls = stubFetch({ body: { access_token: 'AT_G', refresh_token: 'RT_NUEVO' } })
     const onSave = vi.fn(async () => undefined)
 
@@ -339,15 +384,16 @@ describe('sendEmail (despacho)', () => {
   it('OAuth2 envía vía Graph y no crea transportador SMTP', async () => {
     const calls = stubFetch(
       { body: { access_token: 'AT_G', refresh_token: 'RT_ROTADO' } },
+      { status: 201, body: { id: 'MSG-1', internetMessageId: '<z@empresa.com>' } },
       { status: 202, body: {} },
     )
 
     await sendEmail('cliente@empresa.com', '[TK-11111] Acuse', '<p>Acuse</p>')
 
     expect(mockedTransport).not.toHaveBeenCalled()
-    expect(calls).toHaveLength(2)
-    expect(calls[1].url).toBe('https://graph.microsoft.com/v1.0/me/sendMail')
-    expect(parsedBody(calls[1]).message?.subject).toBe('[TK-11111] Acuse')
+    expect(calls).toHaveLength(3)
+    expect(calls[1].url).toBe('https://graph.microsoft.com/v1.0/me/messages')
+    expect(messageOf(calls[1]).subject).toBe('[TK-11111] Acuse')
     expect(mockedSave).toHaveBeenCalledWith({ refreshToken: 'RT_ROTADO' })
   })
 
@@ -371,6 +417,7 @@ describe('sendEmail (despacho)', () => {
   it('OAuth2 reenvía los adjuntos a Graph como fileAttachment', async () => {
     const calls = stubFetch(
       { body: { access_token: 'AT_G' } },
+      { status: 201, body: { id: 'MSG-ATT', internetMessageId: '<att@empresa.com>' } },
       { status: 202, body: {} },
     )
 
@@ -383,7 +430,7 @@ describe('sendEmail (despacho)', () => {
     )
 
     expect(mockedTransport).not.toHaveBeenCalled()
-    expect(parsedBody(calls[1]).message?.attachments).toEqual([
+    expect(messageOf(calls[1]).attachments).toEqual([
       {
         '@odata.type': '#microsoft.graph.fileAttachment',
         name: 'captura.png',

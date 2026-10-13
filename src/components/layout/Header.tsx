@@ -7,6 +7,8 @@ import { Button } from "../ui/button"
 import { useAuthStore } from "@/store/useAuthStore"
 import { useSocket, onNotificacion } from "@/hooks/useSocket"
 import { playNotificationSound } from "@/lib/sound"
+import { toast } from "sonner"
+import { pushPermission, requestPushPermission, showPush, type PushPermission } from "@/lib/push"
 import { formatDateTime } from "@/lib/utils"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -46,9 +48,15 @@ export function Header() {
   const [notifs, setNotifs] = useState<Notificacion[]>([])
   const [noLeidas, setNoLeidas] = useState(0)
   const [notifOpen, setNotifOpen] = useState(false)
+  const [pushPerm, setPushPerm] = useState<PushPermission>("default")
   const notifRef = useRef<HTMLDivElement>(null)
 
   useSocket()
+
+  const toggleNotif = useCallback(() => {
+    setNotifOpen(v => !v)
+    setPushPerm(pushPermission())
+  }, [])
 
   const fetchNotifs = useCallback(async () => {
     try {
@@ -68,8 +76,23 @@ export function Header() {
       setNotifs(prev => [data.notificacion, ...prev])
       setNoLeidas(prev => prev + 1)
       playNotificationSound()
+
+      const n = data.notificacion
+      const url = n?.ticket?.id ? `/tickets/${n.ticket.id}` : undefined
+      toast(n?.mensaje || "Nueva notificación", {
+        description: n?.ticket?.codigo ? `Ticket ${n.ticket.codigo}` : undefined,
+        action: url ? { label: "Ver", onClick: () => router.push(url) } : undefined,
+      })
+      showPush("Nueva notificación", { body: n?.mensaje, url, tag: n?.id })
     })
     return unsub
+  }, [router])
+
+  const handleEnablePush = useCallback(async () => {
+    const perm = await requestPushPermission()
+    setPushPerm(perm)
+    if (perm === "granted") toast.success("Notificaciones de escritorio activadas")
+    else if (perm === "denied") toast.error("El navegador bloqueó las notificaciones")
   }, [])
 
   useEffect(() => {
@@ -169,7 +192,7 @@ export function Header() {
         <div className="h-6 w-px bg-border hidden md:block" />
 
         <div className="relative" ref={notifRef}>
-          <Button variant="ghost" size="icon" onClick={() => setNotifOpen(!notifOpen)}
+          <Button variant="ghost" size="icon" onClick={toggleNotif}
             className="relative text-muted-foreground hover:bg-muted/80 rounded-full h-10 w-10 transition-colors"
           >
             <Bell className="h-5 w-5" />
@@ -197,6 +220,13 @@ export function Header() {
                   )}
                 </div>
               </div>
+              {pushPerm !== "granted" && pushPerm !== "unsupported" && (
+                <button onClick={handleEnablePush}
+                  className="w-full px-4 py-2.5 text-xs font-medium text-left text-primary bg-primary/5 hover:bg-primary/10 transition-colors border-b border-border/50 flex items-center gap-2"
+                >
+                  <Bell className="h-3.5 w-3.5" /> Activar avisos de escritorio
+                </button>
+              )}
               <div className="max-h-[360px] overflow-y-auto">
                 {notifs.length === 0 ? (
                   <div className="p-6 text-center text-sm text-muted-foreground">Sin notificaciones</div>

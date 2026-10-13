@@ -11,6 +11,7 @@ export interface CommentRecipient {
 }
 
 export interface CommentNotifyTicket {
+  id: string
   codigo: string
   asunto: string
   estado: string
@@ -86,6 +87,7 @@ export function buildCommentEmailEvents(input: CommentNotifyInput): EmailEvent[]
       nombre: input.solicitante.nombre,
       data,
       comentario: input.comentario,
+      ticketId: input.ticket.id,
       ...thread,
       ...adjuntos,
     })
@@ -97,6 +99,7 @@ export function buildCommentEmailEvents(input: CommentNotifyInput): EmailEvent[]
       nombre: input.agente.nombre,
       data,
       comentario: input.comentario,
+      ticketId: input.ticket.id,
       ...thread,
       ...adjuntos,
     })

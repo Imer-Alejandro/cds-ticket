@@ -247,6 +247,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             to: agente.correo,
             agenteNombre: `${agente.nombre} ${agente.apellido}`.trim(),
             data: mailData,
+            ticketId: ticket.id,
             ...thread,
           })
         }
@@ -261,6 +262,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             nombre: `${solicitante.nombre} ${solicitante.apellido}`.trim(),
             data: mailData,
             estadoLabel: data.estado.replace(/_/g, ' '),
+            ticketId: ticket.id,
             ...thread,
           })
         }

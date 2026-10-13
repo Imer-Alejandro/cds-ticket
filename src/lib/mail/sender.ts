@@ -3,7 +3,8 @@ import { loadEmailConfig, saveEmailConfig } from './config'
 import { createOutbox, type EmailAttachment, type EmailMessage, type EmailOutboxInstance } from './outbox'
 import { extractTicketCode } from './core'
 import { getMicrosoftGraphAccessToken } from './oauth'
-import { sendEmailViaGraph } from './graph'
+import { sendEmailViaGraph, type GraphSendResult } from './graph'
+import { recordOutboundMessage } from './thread-store'
 
 let outbox: EmailOutboxInstance | null = null
 
@@ -12,6 +13,7 @@ let outbox: EmailOutboxInstance | null = null
  * OAuth2 → Microsoft Graph (el tenant bloquea SMTP AUTH); password → SMTP.
  * Incluye cabeceras de hilo de conversación (In-Reply-To, References, Message-ID)
  * y adjuntos opcionales (base64).
+ * Devuelve el Message-ID del mensaje enviado (para encadenar el hilo del ticket).
  */
 export async function sendEmail(
   to: string,
@@ -19,22 +21,21 @@ export async function sendEmail(
   html: string,
   headers?: { messageId?: string; inReplyTo?: string; references?: string },
   attachments?: EmailAttachment[],
-): Promise<void> {
+): Promise<GraphSendResult | undefined> {
   const config = await loadEmailConfig()
   if (!config.fromAddress) {
     console.warn('[Mail] Email no enviado: falta fromAddress en Ajustes > Correo')
-    return
+    return undefined
   }
 
   if (config.authMode === 'oauth2') {
     const accessToken = await getMicrosoftGraphAccessToken(config, async (refreshToken) => { await saveEmailConfig({ refreshToken }) })
-    await sendEmailViaGraph(accessToken, { to, subject, html, headers, attachments })
-    return
+    return await sendEmailViaGraph(accessToken, { to, subject, html, headers, attachments })
   }
 
   if (!config.smtpHost) {
     console.warn('[Mail] Email no enviado: SMTP sin configurar (falta smtpHost en Ajustes > Correo)')
-    return
+    return undefined
   }
 
   const transporter = nodemailer.createTransport({
@@ -83,21 +84,27 @@ export async function sendEmail(
     }
   }
 
-  await transporter.sendMail(mailOptions)
+  const info = await transporter.sendMail(mailOptions)
+  return { internetMessageId: info.messageId ?? undefined }
 }
 
 /**
  * Interfaz pública: encola el correo en la cola global con reintentos.
  * Utiliza el transportador real por defecto (cargando config SMTP desde BD).
+ * Tras enviar, si el correo pertenece a un ticket, guarda su Message-ID para
+ * que los siguientes correos del ticket se encadenen como respuestas.
  */
 export function enqueueEmail(msg: EmailMessage): void {
   if (!outbox) {
     outbox = createOutbox({
-      send: async ({ to, subject, html, inReplyTo, references, attachments }) => {
-        await sendEmail(to, subject, html, {
+      send: async ({ to, subject, html, inReplyTo, references, attachments, ticketId, ticketRoot }) => {
+        const result = await sendEmail(to, subject, html, {
           inReplyTo: inReplyTo ?? undefined,
           references: references ?? undefined,
         }, attachments)
+        if (ticketId && result?.internetMessageId) {
+          await recordOutboundMessage(ticketId, result.internetMessageId, ticketRoot)
+        }
       },
       enabled: () => true,
     })
