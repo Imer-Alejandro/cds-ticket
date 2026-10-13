@@ -83,6 +83,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const updateData: any = {}
     const logs: { accion: string; valorAnterior?: string; valorNuevo?: string }[] = []
+    // Eliminar (o archivar) un ticket no debe notificar al usuario ni enviar correo.
+    const esEliminacion = data.estado === 'ELIMINADO'
 
     if (data.estado && data.estado !== ticket.estado) {
       if (!puedeCambiarEstado) {
@@ -218,7 +220,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       })
     }
 
-    if (data.estado) {
+    if (data.estado && !esEliminacion) {
       await createNotification(ticket.solicitanteId, 'CAMBIO_ESTADO', `Ticket ${ticket.codigo} cambió a ${data.estado.replace(/_/g, ' ')}`, id)
     }
     if (data.agenteId && data.agenteId !== ticket.agenteId) {
@@ -253,7 +255,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         }
       }
 
-      if (data.estado) {
+      if (data.estado && !esEliminacion) {
         const solicitante = await prisma.usuario.findUnique({ where: { id: ticket.solicitanteId } })
         if (solicitante?.correo && solicitante.activo !== false) {
           notifyByEmail({
