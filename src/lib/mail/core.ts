@@ -136,6 +136,35 @@ export function cleanReplyText(text: string): string {
 }
 
 /**
+ * Detecta correos automáticos (rebotes de no-entrega, autorespuestas, avisos de
+ * sistema) que NO deben convertirse en comentarios ni tocar el hilo del ticket.
+ */
+export function isAutomatedEmail(email: {
+  from?: unknown
+  subject?: string | null
+  headers?: { get?: (name: string) => unknown } | null
+}): boolean {
+  const subject = (email.subject ?? '').trim()
+  if (
+    subject &&
+    /(undeliverable|delivery status notification|mail delivery (failed|subsystem)|returned mail|returned to sender|failure notice|no se pudo entregar|delivery has failed|automatic reply|auto-?reply|out of office|fuera de la oficina|respuesta autom[aá]tica|mensaje autom[aá]tico|autorespuesta)/i.test(
+      subject
+    )
+  ) {
+    return true
+  }
+
+  const from = normalizeFromAddress(email.from) || ''
+  const local = from.split('@')[0] || ''
+  if (/^(postmaster|mailer-?daemon|mail-daemon)$/i.test(local)) return true
+
+  const auto = email.headers?.get?.('auto-submitted')
+  if (auto && String(auto).trim().toLowerCase() !== 'no') return true
+
+  return false
+}
+
+/**
  * Quita el prefijo de código de ticket del asunto para usarlo como comentario.
  * Devuelve el asunto limpio.
  */

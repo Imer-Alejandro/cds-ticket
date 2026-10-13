@@ -8,6 +8,7 @@ import {
   normalizeMessageId,
   headerThreadIds,
   mergeThreadRefs,
+  isAutomatedEmail,
 } from './core'
 import { etiquetaColor } from '../categorize'
 import type { AgenteCandidato } from '@/lib/assignment'
@@ -255,6 +256,13 @@ export async function handleIncomingEmail(
   const decision = decideIncomingEmail(email.from, email.subject, headers)
   const fromEmail = decision.fromEmail
   const incomingMessageId = normalizeMessageId(headers.messageId)
+
+  // Rebotes de no-entrega y autorespuestas: no deben crear comentarios ni
+  // desplazar el hilo del ticket.
+  if (isAutomatedEmail({ from: email.from, subject: email.subject, headers: (email as any).headers })) {
+    log?.('[Mail] Ignorado: correo automático o rebote de no-entrega')
+    return null
+  }
 
   if (!fromEmail) {
     log?.('[Mail] Ignorado: sin dirección de remitente')

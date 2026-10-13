@@ -94,4 +94,27 @@ Subject: [TK-00005] Consulta`
     expect(linkedLabels[0].ticketId).toBe('t1')
     expect(linkedLabels[0].etiquetaId).toBe('lbl-1')
   })
+
+  it('ignora rebotes y correos automáticos sin tocar el ticket', async () => {
+    const comentarioCreate = vi.fn()
+    const mockRepo: any = {
+      ticket: { findUnique: vi.fn(), create: vi.fn() },
+      comentario: { create: comentarioCreate },
+      logTicket: { create: vi.fn() },
+      adjunto: { createMany: vi.fn() },
+    }
+
+    const result = await handleIncomingEmail(
+      { repo: mockRepo },
+      {
+        from: 'postmaster@empresa.com',
+        subject: 'Undeliverable: [TK-00100] Nuevo comentario en: prueba',
+        text: 'El mensaje no se pudo entregar.',
+      }
+    )
+
+    expect(result).toBeNull()
+    expect(comentarioCreate).not.toHaveBeenCalled()
+    expect(mockRepo.ticket.findUnique).not.toHaveBeenCalled()
+  })
 })

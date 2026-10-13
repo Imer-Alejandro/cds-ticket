@@ -141,25 +141,26 @@ function threadCandidates(headers?: GraphMailInput['headers']): string[] {
 }
 
 /**
- * Busca en el buzón (una sola consulta con OR) los internetMessageIds del hilo
- * y devuelve el id de Graph del primero que exista. Si no están, devuelve null
- * y el correo sale sin encadenar: un fallo de búsqueda nunca debe impedir el envío.
+ * Busca en el buzón los internetMessageIds del hilo, probando los candidatos en
+ * orden (primero el padre). Devuelve el id de Graph del primero que exista; si
+ * ninguno está, devuelve null y el correo sale sin encadenar: un fallo de
+ * búsqueda nunca debe impedir el envío.
  */
 async function findThreadMessageId(accessToken: string, candidates: string[]): Promise<string | null> {
-  try {
-    const filter = candidates
-      .slice(0, 3)
-      .map((id) => `internetMessageId eq '${encodeURIComponent(`<${id}>`)}'`)
-      .join(' or ')
-    const response = await graphRequest<{ value?: { id?: string }[] }>(
-      accessToken,
-      `${GRAPH_API}/me/messages?$filter=${filter}&$select=id&$top=1`,
-      'GET',
-    )
-    return response?.value?.[0]?.id ?? null
-  } catch {
-    return null
+  for (const id of candidates.slice(0, 3)) {
+    try {
+      const filter = `internetMessageId eq '${encodeURIComponent(`<${id}>`)}'`
+      const res = await graphRequest<{ value?: { id?: string }[] }>(
+        accessToken,
+        `${GRAPH_API}/me/messages?$filter=${filter}&$select=id&$top=1`,
+        'GET',
+      )
+      if (res?.value?.[0]?.id) return res.value[0].id
+    } catch {
+      // Un fallo de búsqueda no debe impedir probar el siguiente candidato.
+    }
   }
+  return null
 }
 
 /** Petición Graph con manejo uniforme de errores. Devuelve el JSON o lanza. */

@@ -7,6 +7,7 @@ import {
   emailBodyToText,
   stripLegalFooter,
   normalizeFromAddress,
+  isAutomatedEmail,
   slaStatus,
 } from '../src/lib/mail/core'
 
@@ -23,6 +24,37 @@ describe('extractTicketCode', () => {
     expect(extractTicketCode('Hola, necesito ayuda')).toBeNull()
     expect(extractTicketCode(null)).toBeNull()
     expect(extractTicketCode(undefined)).toBeNull()
+  })
+})
+
+describe('isAutomatedEmail', () => {
+  it('detecta rebotes de no-entrega por asunto', () => {
+    expect(isAutomatedEmail({ subject: 'Undeliverable: [TK-00001] Nuevo comentario' })).toBe(true)
+    expect(isAutomatedEmail({ subject: 'Delivery Status Notification (Failure)' })).toBe(true)
+    expect(isAutomatedEmail({ subject: 'Mail delivery failed: returning message to sender' })).toBe(true)
+    expect(isAutomatedEmail({ subject: 'No se pudo entregar el mensaje' })).toBe(true)
+  })
+
+  it('detecta autorespuestas y fuera de oficina', () => {
+    expect(isAutomatedEmail({ subject: 'Automatic reply: consulta' })).toBe(true)
+    expect(isAutomatedEmail({ subject: 'Out of office' })).toBe(true)
+    expect(isAutomatedEmail({ subject: 'Respuesta automática' })).toBe(true)
+  })
+
+  it('detecta remitentes de sistema', () => {
+    expect(isAutomatedEmail({ from: 'postmaster@empresa.com', subject: 'algo' })).toBe(true)
+    expect(isAutomatedEmail({ from: 'MAILER-DAEMON@empresa.com', subject: 'algo' })).toBe(true)
+  })
+
+  it('detecta la cabecera Auto-Submitted', () => {
+    const headers = { get: (name: string) => (name === 'auto-submitted' ? 'auto-replied' : null) }
+    expect(isAutomatedEmail({ subject: 'algo', headers })).toBe(true)
+    const notAuto = { get: (name: string) => (name === 'auto-submitted' ? 'no' : null) }
+    expect(isAutomatedEmail({ subject: 'algo', headers: notAuto })).toBe(false)
+  })
+
+  it('no marca como automático un correo normal', () => {
+    expect(isAutomatedEmail({ from: 'juan@cliente.com', subject: 'Re: problema [TK-00010]' })).toBe(false)
   })
 })
 

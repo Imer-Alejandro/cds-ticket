@@ -53,7 +53,10 @@ export function threadHeadersFromTicket(ticket: {
   threadRefs?: string | null
   ultimoMessageId?: string | null
 }): EmailThreadHeaders {
-  const padre = ticket.ultimoMessageId || ticket.messageId || null
+  // Se enlaza siempre a la RAÍZ del ticket (el primer mensaje conocido) para que
+  // toda la conversación quede en el mismo hilo, aunque lleguen correos
+  // automáticos/rebotes que muevan `ultimoMessageId`.
+  const padre = ticket.messageId || ticket.ultimoMessageId || null
   const chain: string[] = []
   for (const raw of [ticket.threadRefs, padre]) {
     if (!raw) continue

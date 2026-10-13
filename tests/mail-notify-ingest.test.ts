@@ -66,8 +66,9 @@ describe('notifyIngestResult', () => {
       expect.objectContaining({
         type: 'TICKET_CREADO',
         to: 'juan@x.com',
-        inReplyTo: '<previo@mail>',
+        inReplyTo: '<raiz@mail>',
         references: '<raiz@mail> <previo@mail>',
+        ticketRoot: true,
       })
     )
     expect(deps.emit).toHaveBeenCalledWith(expect.objectContaining({ codigo: 'TK-00045' }), 'nuevo')
@@ -87,7 +88,7 @@ describe('notifyIngestResult', () => {
     expect(deps.sendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'NUEVO_COMENTARIO',
-        inReplyTo: '<previo@mail>',
+        inReplyTo: '<raiz@mail>',
         references: '<raiz@mail> <previo@mail>',
       })
     )

@@ -41,7 +41,7 @@ describe('buildCommentEmailEvents', () => {
       to: 'juan@x.com',
       nombre: 'Juan Pérez',
       comentario: 'Revisando el equipo ahora mismo',
-      inReplyTo: '<previo@mail>',
+      inReplyTo: '<raiz@mail>',
       references: '<raiz@mail> <previo@mail>',
     })
     expect(events[0].data.codigo).toBe('TK-00045')
@@ -55,7 +55,7 @@ describe('buildCommentEmailEvents', () => {
       type: 'NUEVO_COMENTARIO',
       to: 'ana@x.com',
       nombre: 'Ana García',
-      inReplyTo: '<previo@mail>',
+      inReplyTo: '<raiz@mail>',
       references: '<raiz@mail> <previo@mail>',
     })
   })
@@ -141,16 +141,16 @@ describe('buildCommentEmailEvents', () => {
 })
 
 describe('threadHeadersFromTicket', () => {
-  it('usa el último mensaje como padre y la cadena completa como references', () => {
+  it('enlaza siempre a la raíz del ticket como padre y usa la cadena completa', () => {
     const thread = threadHeadersFromTicket(TICKET)
-    expect(thread.inReplyTo).toBe('<previo@mail>')
+    expect(thread.inReplyTo).toBe('<raiz@mail>')
     expect(thread.references).toBe('<raiz@mail> <previo@mail>')
   })
 
-  it('si no hay último mensaje, usa la raíz como padre', () => {
-    const thread = threadHeadersFromTicket({ ...TICKET, threadRefs: 'raiz@mail', ultimoMessageId: null })
-    expect(thread.inReplyTo).toBe('<raiz@mail>')
-    expect(thread.references).toBe('<raiz@mail>')
+  it('sin raíz usa el último mensaje como padre', () => {
+    const thread = threadHeadersFromTicket({ messageId: null, threadRefs: 'previo@mail', ultimoMessageId: 'previo@mail' })
+    expect(thread.inReplyTo).toBe('<previo@mail>')
+    expect(thread.references).toBe('<previo@mail>')
   })
 
   it('normaliza ids guardados con ángulos sin duplicarlos', () => {
@@ -159,7 +159,7 @@ describe('threadHeadersFromTicket', () => {
       threadRefs: '<raiz@mail> <otro@mail>',
       ultimoMessageId: '<otro@mail>',
     })
-    expect(thread.inReplyTo).toBe('<otro@mail>')
+    expect(thread.inReplyTo).toBe('<raiz@mail>')
     expect(thread.references).toBe('<raiz@mail> <otro@mail>')
   })
 
