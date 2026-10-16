@@ -28,6 +28,12 @@ interface Ticket {
   fechaCreacion: string
 }
 
+interface TicketAgent {
+  id: string
+  nombre: string
+  apellido: string
+}
+
 interface TicketListResponse {
   tickets: Ticket[]
   total: number
@@ -88,6 +94,11 @@ function TicketsContent() {
   const [search, setSearch] = useState("")
   const [estadoFilter, setEstadoFilter] = useState(searchParams.get("estado") || "")
   const [prioridadFilter, setPrioridadFilter] = useState("")
+  const [agenteFilter, setAgenteFilter] = useState("")
+  const [fechaDesde, setFechaDesde] = useState("")
+  const [fechaHasta, setFechaHasta] = useState("")
+  const [agentes, setAgentes] = useState<TicketAgent[]>([])
+  const [errorAgentes, setErrorAgentes] = useState(false)
   const [sortField, setSortField] = useState("fechaCreacion")
   const [sortDir, setSortDir] = useState("desc")
   const [vista, setVista] = useState<VistaFilter>("todos")
@@ -110,6 +121,22 @@ function TicketsContent() {
   }, [searchParams])
 
   const pageSize = view === "kanban" ? 100 : 20
+
+  useEffect(() => {
+    let activo = true
+    apiFetch("/api/tickets/agents")
+      .then(async response => {
+        if (!response.ok) throw new Error("No se pudieron cargar los agentes")
+        return response.json() as Promise<TicketAgent[]>
+      })
+      .then(data => {
+        if (activo) setAgentes(data)
+      })
+      .catch(() => {
+        if (activo) setErrorAgentes(true)
+      })
+    return () => { activo = false }
+  }, [])
 
   const fetchStats = useCallback(async () => {
     try {
@@ -150,6 +177,9 @@ function TicketsContent() {
     if (search) params.set("search", search)
     if (estadoFilter) params.set("estado", estadoFilter)
     if (prioridadFilter) params.set("prioridad", prioridadFilter)
+    if (agenteFilter) params.set("agenteId", agenteFilter)
+    if (fechaDesde) params.set("fechaDesde", fechaDesde)
+    if (fechaHasta) params.set("fechaHasta", fechaHasta)
     if (vista === "mios" && user?.id) params.set("asignadosA", user.id)
     if (vista === "sinAsignar") params.set("sinAsignar", "true")
     params.set("sortField", sortField)
@@ -164,9 +194,9 @@ function TicketsContent() {
         setTotalPages(data?.totalPages || 1)
       })
       .finally(() => setLoading(false))
-  }, [search, estadoFilter, prioridadFilter, sortField, sortDir, vista, user?.id, page, fetchTick, view])
+  }, [search, estadoFilter, prioridadFilter, agenteFilter, fechaDesde, fechaHasta, sortField, sortDir, vista, user?.id, page, fetchTick, view])
 
-  const hasFilters = search || estadoFilter || prioridadFilter || vista !== "todos"
+  const hasFilters = search || estadoFilter || prioridadFilter || agenteFilter || fechaDesde || fechaHasta || vista !== "todos"
 
   const handleSort = (f: string) => {
     if (f === sortField) {
@@ -177,7 +207,8 @@ function TicketsContent() {
   }
 
   const clearFilters = () => {
-    setSearch(""); setEstadoFilter(""); setPrioridadFilter(""); setVista("todos"); setPage(1)
+    setSearch(""); setEstadoFilter(""); setPrioridadFilter(""); setAgenteFilter("")
+    setFechaDesde(""); setFechaHasta(""); setVista("todos"); setPage(1)
   }
 
   const handleChangeEstado = async (ticketId: string, nuevoEstado: string) => {
@@ -275,6 +306,40 @@ function TicketsContent() {
             <option value="">Todas las prioridades</option>
             {PRIORIDADES.filter(Boolean).map(p => <option key={p} value={p}>{p}</option>)}
           </select>
+          <select
+            value={agenteFilter}
+            onChange={e => { setAgenteFilter(e.target.value); setVista("todos"); setPage(1) }}
+            className="h-10 rounded-xl border border-border bg-transparent px-3 text-sm min-w-[170px]"
+            aria-label="Filtrar por agente"
+            disabled={errorAgentes}
+          >
+            <option value="">{errorAgentes ? "Error al cargar agentes" : "Todos los agentes"}</option>
+            {agentes.map(agente => (
+              <option key={agente.id} value={agente.id}>{agente.nombre} {agente.apellido}</option>
+            ))}
+          </select>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Desde
+            <input
+              type="date"
+              value={fechaDesde}
+              max={fechaHasta || undefined}
+              onChange={e => { setFechaDesde(e.target.value); setPage(1) }}
+              className="h-10 rounded-xl border border-border bg-transparent px-3 text-sm text-foreground"
+              aria-label="Fecha desde"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Hasta
+            <input
+              type="date"
+              value={fechaHasta}
+              min={fechaDesde || undefined}
+              onChange={e => { setFechaHasta(e.target.value); setPage(1) }}
+              className="h-10 rounded-xl border border-border bg-transparent px-3 text-sm text-foreground"
+              aria-label="Fecha hasta"
+            />
+          </label>
           {hasFilters && (
             <Button
               variant="ghost"

@@ -30,6 +30,8 @@ export async function GET(request: Request) {
     const prioridad = searchParams.get('prioridad') || ''
     const categoriaId = searchParams.get('categoriaId') || ''
     const agenteId = searchParams.get('agenteId') || ''
+    const fechaDesdeParam = searchParams.get('fechaDesde')
+    const fechaHastaParam = searchParams.get('fechaHasta')
     const sinAsignar = searchParams.get('sinAsignar') === 'true'
     const asignadosA = searchParams.get('asignadosA') || ''
     const sortField = searchParams.get('sortField') || 'fechaCreacion'
@@ -37,7 +39,27 @@ export async function GET(request: Request) {
     const page = parseInt(searchParams.get('page') || '1', 10)
     const pageSize = Math.min(Math.max(parseInt(searchParams.get('pageSize') || '20', 10), 1), 100)
 
+    const parseDate = (value: string | null) => {
+      if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+      const date = new Date(`${value}T00:00:00.000Z`)
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value ? date : null
+    }
+    const fechaDesde = parseDate(fechaDesdeParam)
+    const fechaHasta = parseDate(fechaHastaParam)
+    if ((fechaDesdeParam && !fechaDesde) || (fechaHastaParam && !fechaHasta)) {
+      return NextResponse.json({ error: 'Formato de fecha inválido' }, { status: 400 })
+    }
+    if (fechaDesde && fechaHasta && fechaDesde > fechaHasta) {
+      return NextResponse.json({ error: 'La fecha inicial no puede ser posterior a la fecha final' }, { status: 400 })
+    }
+
     const where: any = {}
+    if (fechaDesde || fechaHasta) {
+      where.fechaCreacion = {
+        ...(fechaDesde ? { gte: fechaDesde } : {}),
+        ...(fechaHasta ? { lt: new Date(fechaHasta.getTime() + 24 * 60 * 60 * 1000) } : {}),
+      }
+    }
     if (search) {
       where.OR = [
         { asunto: { contains: search, mode: 'insensitive' } },
