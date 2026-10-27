@@ -1,130 +1,100 @@
-# CDS Ticket - Backend Setup
+# CDS Ticket: ejecucion con Docker
 
-## Estructura de la aplicación
+Docker Compose ejecuta el frontend Next.js y el backend Express/Socket.IO en
+contenedores separados. Ambos se conectan a la misma instancia externa de
+CockroachDB configurada por Prisma; no se crea ni se publica una base de datos
+local.
 
-Esta aplicación está dividida en dos partes:
+## Requisitos
 
-### Frontend (Next.js)
-- **Puerto**: 3000
-- **Ubicación**: `/src/app`
-- **Comando**: `npm run dev`
+- Docker Engine con Docker Compose v2 en el servidor.
+- Acceso de red desde el servidor a CockroachDB y permiso para conectar desde
+  su IP de salida.
+- Una base de datos de desarrollo o produccion ya creada en CockroachDB.
+- Inicio automatico del servicio Docker al arrancar el sistema operativo.
 
-### Backend (Express + Socket.IO)
-- **Puerto**: 3001
-- **Ubicación**: `/backend`
-- **Comando**: `npm run dev:backend`
+## Preparar el entorno
 
-## Configuración
+Desde la carpeta del proyecto, crea el archivo privado de configuracion:
 
-### Paso 1: Copiar variables de entorno
-
-```bash
-# En la raíz del proyecto
-cp .env.example .env.local
-
-# En la carpeta del backend
-cp backend/.env.example backend/.env.local
+```powershell
+Copy-Item .env.docker.example .env.docker
 ```
 
-### Paso 2: Instalar dependencias
+Edita `.env.docker` y reemplaza la URL de ejemplo de `DATABASE_URL` por la URL
+de conexion de CockroachDB. Configura tambien un `JWT_SECRET` aleatorio y largo.
+No compartas ni subas `.env.docker`; esta excluido de Git y de la imagen Docker.
 
-```bash
-npm install
+`NEXT_PUBLIC_SOCKET_URL` se incorpora al bundle del navegador durante la
+construccion. Para usar la aplicacion desde otros equipos, pon la IP o el DNS
+del servidor en `APP_URL` y `NEXT_PUBLIC_SOCKET_URL`, por ejemplo:
+
+```env
+APP_URL=https://tickets.midominio.local
+NEXT_PUBLIC_SOCKET_URL=https://tickets.midominio.local
+BIND_ADDRESS=127.0.0.1
 ```
 
-### Paso 3: Configurar la base de datos
+Configura un proxy inverso con TLS y certificado confiable para ese nombre, y
+permite el acceso al proxy desde la red local. La aplicacion usa cookies
+`Secure` en modo produccion. Para acceso solo desde el servidor, conserva
+`localhost` y `BIND_ADDRESS=127.0.0.1`. No publiques los puertos directamente a
+Internet.
 
-```bash
-# Ejecutar migraciones de Prisma
-npx prisma migrate dev
+## Aplicacion de migraciones y arranque
 
-# (Opcional) Ejecutar seed
-npx prisma db seed
+Antes de migrar, confirma que `DATABASE_URL` apunta a la base correcta y que
+tienes un respaldo si contiene datos importantes. Aplica las migraciones
+pendientes y levanta los servicios:
+
+```powershell
+docker compose --env-file .env.docker run --build --rm backend npx prisma migrate deploy
+docker compose --env-file .env.docker up -d --build
 ```
 
-## Ejecución en desarrollo
+Abre `http://localhost:3000` en el servidor, o la URL configurada en `APP_URL`
+desde otro equipo. El backend escucha en el puerto 3001 para Socket.IO. Para
+revisar estado y logs:
 
-### Opción 1: Ejecutar ambos servidores (recomendado)
-
-```bash
-npm run dev:all
+```powershell
+docker compose --env-file .env.docker ps
+docker compose --env-file .env.docker logs -f
 ```
 
-Esto iniciará:
-- **Frontend**: http://localhost:3000
-- **Backend**: http://localhost:3001
+Los contenedores usan `restart: unless-stopped`: Docker los inicia al arrancar
+el servicio Docker y vuelve a iniciarlos si el proceso termina. Asegurate de
+habilitar el inicio del servicio Docker con el sistema operativo. Los
+healthchecks permiten consultar si responden; la politica de reinicio no
+recupera por si sola procesos que permanezcan activos pero no saludables.
 
-### Opción 2: Ejecutar por separado
+Al publicar una nueva version, aplica migraciones pendientes y reconstruye:
 
-**Terminal 1 - Frontend:**
-```bash
+```powershell
+docker compose --env-file .env.docker run --build --rm backend npx prisma migrate deploy
+docker compose --env-file .env.docker up -d --build
+```
+
+Para detener los contenedores sin borrar datos de CockroachDB:
+
+```powershell
+docker compose --env-file .env.docker down
+```
+
+El seed es opcional y debe usarse solo con una base de datos de prueba; crea
+usuarios con contrasena inicial `password123`. No lo ejecutes contra una base
+de produccion:
+
+```powershell
+docker compose --env-file .env.docker run --build --rm backend npx prisma db seed
+```
+
+## Desarrollo sin Docker
+
+Para desarrollo local con Node.js, instala dependencias con `npm install`,
+configura `DATABASE_URL` en `.env.local` y ejecuta:
+
+```powershell
 npm run dev
 ```
 
-**Terminal 2 - Backend:**
-```bash
-npm run dev:backend
-```
-
-## Ejecución en producción
-
-```bash
-# Build
-npm run build
-
-# Start
-npm start
-```
-
-## Servicios en el Backend
-
-### Socket.IO
-- **URL**: `http://localhost:3001`
-- **Autenticación**: JWT token
-- **Eventos**:
-  - `notificacion` - Notificaciones generales
-  - `nuevoTicket` - Nuevo ticket creado
-
-### Mail Listener
-- **Función**: Escucha nuevos correos IMAP
-- **Intervalo**: Configurable desde la BD (por defecto: 60 segundos)
-- **Acción**: Crea automáticamente tickets desde correos
-
-## Estructura del Backend
-
-```
-backend/
-├── server.ts              # Punto de entrada
-├── src/
-│   ├── socket.ts         # Socket.IO setup
-│   └── mail.ts           # Mail listener logic
-├── lib/
-│   ├── auth.ts           # Auth utilities (re-export de src)
-│   └── email-config.ts   # Email configuration loader
-└── tsconfig.json
-```
-
-## Variables de entorno
-
-### Frontend (.env.local)
-- `NEXT_PUBLIC_API_URL` - URL de la API (por defecto: http://localhost:3000)
-- `NEXT_PUBLIC_SOCKET_URL` - URL del backend Socket.IO (por defecto: http://localhost:3001)
-
-### Backend (backend/.env.local)
-- `BACKEND_PORT` - Puerto del servidor (por defecto: 3001)
-- `NODE_ENV` - Entorno (development, production)
-- `DATABASE_URL` - URL de conexión a PostgreSQL
-
-## Troubleshooting
-
-### "Socket.IO no se conecta"
-- Asegúrate de que el backend esté ejecutándose en el puerto correcto
-- Verifica que `NEXT_PUBLIC_SOCKET_URL` apunte a la URL correcta
-- Revisa la consola del navegador para errores de conexión
-
-### "Mail listener no se inicia"
-- Verifica que la configuración de email esté habilitada en la BD
-- Revisa los logs del backend para errores IMAP
-
-### "AsyncLocalStorage error" (anterior a estos cambios)
-- Este error ya no ocurrirá. Next.js ahora se ejecuta en modo normal sin servidor personalizado.
+Next.js usa el puerto 3000 y Express/Socket.IO el 3001.

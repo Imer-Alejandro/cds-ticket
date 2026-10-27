@@ -1,0 +1,54 @@
+services:
+  backend:
+    build:
+      context: .
+      target: backend
+    environment:
+      NODE_ENV: production
+      BACKEND_PORT: 3001
+      SOCKET_INTERNAL_URL: http://backend:3001
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env.docker}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.docker}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:3001:3001"
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    networks:
+      - app
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+      args:
+        NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL:-http://localhost:3001}
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      SOCKET_INTERNAL_URL: http://backend:3001
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env.docker}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.docker}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    networks:
+      - app
+
+networks:
+  app:
+    driver: bridge

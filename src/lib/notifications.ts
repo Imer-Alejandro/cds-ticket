@@ -10,7 +10,11 @@ async function emitSocketEvent(event: string, payload: any, room?: string) {
       return
     }
 
-    const baseUrl = (process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001').replace(/\/$/, '')
+    const baseUrl = (
+      process.env.SOCKET_INTERNAL_URL ||
+      process.env.NEXT_PUBLIC_SOCKET_URL ||
+      'http://localhost:3001'
+    ).replace(/\/$/, '')
     await fetch(`${baseUrl}/socket/emit`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
