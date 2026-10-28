@@ -8,6 +8,8 @@ local.
 ## Requisitos
 
 - Docker Engine con Docker Compose v2 en el servidor.
+- Memoria suficiente asignada a Docker Desktop para compilar Next.js; el build
+  limita a dos los workers de CPU para reducir el consumo de memoria.
 - Acceso de red desde el servidor a CockroachDB y permiso para conectar desde
   su IP de salida.
 - Una base de datos de desarrollo o produccion ya creada en CockroachDB.
